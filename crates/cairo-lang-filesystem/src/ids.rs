@@ -45,6 +45,7 @@ impl FileId {
     pub fn file_name(self, db: &dyn FilesGroup) -> String {
         match db.lookup_intern_file(self) {
             FileLongId::OnDisk(path) => {
+                print!("FS Path is {:?} \n", path.display());
                 path.file_name().and_then(|x| x.to_str()).unwrap_or("<unknown>").to_string()
             }
             FileLongId::Virtual(vf) => vf.name.to_string(),

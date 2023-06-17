@@ -9,6 +9,8 @@ use thiserror::Error;
 
 use crate::db::RootDatabase;
 
+use std::path::PathBuf;
+
 #[cfg(test)]
 #[path = "diagnostics_test.rs"]
 mod test;
@@ -84,7 +86,13 @@ impl<'a> DiagnosticsReporter<'a> {
     /// Returns `true` if diagnostics were found.
     pub fn check(&mut self, db: &RootDatabase) -> bool {
         let mut found_diagnostics = false;
+        // print db crates 
         for crate_id in db.crates() {
+            println!("check crateid : {:?} moduleid: {:?} mainfile: {:?}\n", crate_id, ModuleId::CrateRoot(crate_id), db.module_main_file(ModuleId::CrateRoot(crate_id)));
+        }
+
+        for crate_id in db.crates() {
+            // TAG: get lib.cairo here
             let Ok(module_file) = db.module_main_file(ModuleId::CrateRoot(crate_id)) else {
                 found_diagnostics = true;
                 self.callback.on_diagnostic("Failed to get main module file".to_string());
@@ -94,6 +102,8 @@ impl<'a> DiagnosticsReporter<'a> {
             if db.file_content(module_file).is_none() {
                 match db.lookup_intern_file(module_file) {
                     FileLongId::OnDisk(path) => {
+                        // print file path
+                        println!("check file path: {:?}\n", path.display());
                         self.callback.on_diagnostic(format!("{} not found\n", path.display()))
                     }
                     FileLongId::Virtual(_) => panic!("Missing virtual file."),
@@ -101,6 +111,17 @@ impl<'a> DiagnosticsReporter<'a> {
                 found_diagnostics = true;
             }
 
+            // modify this code to return pathbuf
+            let pathF = match db.lookup_intern_file(module_file) {
+                FileLongId::OnDisk(path) => path,
+                // return empty pathbuf when it is FileLongId::Virtual                
+                FileLongId::Virtual(virtual_file) => PathBuf::new(),
+            };
+
+            // print db file content
+            println!("check module id {:?} name {:?} path {:?} \n file content: {:?}\n", module_file , module_file.file_name(db), pathF.display(), db.file_content(module_file));
+            
+            // TAG: call defs crate_modules()
             for module_id in &*db.crate_modules(crate_id) {
                 for file_id in db.module_files(*module_id).unwrap_or_default() {
                     let diag = db.file_syntax_diagnostics(file_id);

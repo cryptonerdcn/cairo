@@ -114,24 +114,28 @@ impl RootDatabaseBuilder {
         let mut db = RootDatabase::new(self.plugins.clone());
 
         if let Some(cfg_set) = &self.cfg_set {
+            println!("Using cfg set: {:?}", cfg_set);
             db.use_cfg(cfg_set);
         }
 
         if self.detect_corelib {
             let path =
                 detect_corelib().ok_or_else(|| anyhow!("Failed to find development corelib."))?;
+            print!("Core is {:?}\n", path.display());
             init_dev_corelib(&mut db, path);
         }
 
         if let Some(config) = self.project_config.clone() {
             update_crate_roots_from_project_config(&mut db, *config.clone());
+            println!("Project config: {:?}", config);
 
             if let Some(corelib) = config.corelib {
                 let core_crate = db.intern_crate(CrateLongId(CORELIB_CRATE_NAME.into()));
                 db.set_crate_root(core_crate, Some(corelib));
             }
         }
-
+        println!("Crate roots: {:?}\n", db.crate_roots());
+        println!("Crates : {:?}" ,db.crates());
         Ok(db)
     }
 }

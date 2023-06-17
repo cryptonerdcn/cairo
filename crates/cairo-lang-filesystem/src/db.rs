@@ -10,6 +10,8 @@ use crate::flag::Flag;
 use crate::ids::{CrateId, CrateLongId, Directory, FileId, FileLongId, FlagId, FlagLongId};
 use crate::span::{FileSummary, TextOffset, TextWidth};
 
+use std::backtrace::Backtrace;
+
 #[cfg(test)]
 #[path = "db_test.rs"]
 mod test;
@@ -131,15 +133,24 @@ fn crate_root_dir(db: &dyn FilesGroup, crt: CrateId) -> Option<Directory> {
 }
 
 fn priv_raw_file_content(db: &dyn FilesGroup, file: FileId) -> Option<Arc<String>> {
+    // println!("Custom backtrace: {}", Backtrace::capture());
     match db.lookup_intern_file(file) {
         FileLongId::OnDisk(path) => match fs::read_to_string(path) {
-            Ok(content) => Some(Arc::new(content)),
+            Ok(content) => {
+                println!("File ID {:?} is {:?} \n FileEND \n", file, file.file_name(db));
+
+                Some(Arc::new(content))
+            },
             Err(_) => None,
         },
         FileLongId::Virtual(virt) => Some(virt.content),
     }
 }
 fn file_content(db: &dyn FilesGroup, file: FileId) -> Option<Arc<String>> {
+    // print files group
+    //println!("Crate roots: {:?}\n", db.crate_roots());
+    //print file id
+    //println!("File id: {:?}\n", file);
     let overrides = db.file_overrides();
     overrides.get(&file).cloned().or_else(|| db.priv_raw_file_content(file))
 }

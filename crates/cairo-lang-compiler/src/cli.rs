@@ -18,6 +18,8 @@ struct Args {
     /// Replaces sierra ids with human-readable ones.
     #[arg(short, long, default_value_t = false)]
     replace_ids: bool,
+    // TODO: Add string
+    
 }
 
 fn main() -> anyhow::Result<()> {

@@ -35,6 +35,7 @@ pub struct SyntaxData {
 }
 
 pub fn priv_file_syntax_data(db: &dyn ParserGroup, file_id: FileId) -> SyntaxData {
+    // println!("priv_file_syntax_data: {:?}", file_id);
     let mut diagnostics = DiagnosticsBuilder::default();
     let syntax = db
         .file_content(file_id)
@@ -43,6 +44,7 @@ pub fn priv_file_syntax_data(db: &dyn ParserGroup, file_id: FileId) -> SyntaxDat
         .and_then(|s| {
             validate(s.as_syntax_node(), db.upcast(), &mut diagnostics, file_id).and(Ok(s))
         });
+    // println!("priv_file_syntax_data: {:?}", syntax);
     SyntaxData { diagnostics: diagnostics.build(), syntax }
 }
 

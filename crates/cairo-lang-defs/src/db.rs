@@ -206,6 +206,11 @@ fn collect_modules_under(db: &dyn DefsGroup, modules: &mut Vec<ModuleId>, module
 /// Returns all the modules in the crate, including recursively.
 fn crate_modules(db: &dyn DefsGroup, crate_id: CrateId) -> Arc<Vec<ModuleId>> {
     let mut modules = Vec::new();
+    println!("defs crate_modules: {:?}", crate_id);
+    
+    for module_id in db.module_submodules_ids(ModuleId::CrateRoot(crate_id)).unwrap_or_default().into_iter() {
+        println!("defs db sub module_id: {:?}", module_id);
+    }
     collect_modules_under(db, &mut modules, ModuleId::CrateRoot(crate_id));
     Arc::new(modules)
 }
@@ -267,6 +272,7 @@ pub struct ModuleData {
 fn priv_module_data(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<ModuleData> {
     let syntax_db = db.upcast();
     let module_file = db.module_main_file(module_id)?;
+    println!("priv_module_data module_id: {:?} is  module_file: {:?}", module_id, module_file);
 
     let file_syntax = db.file_syntax(module_file)?;
     let mut main_file_info: Option<GeneratedFileInfo> = None;
@@ -473,6 +479,7 @@ fn module_submodules(
     db: &dyn DefsGroup,
     module_id: ModuleId,
 ) -> Maybe<OrderedHashMap<SubmoduleId, ast::ItemModule>> {
+    // println!("module_submodules {:?}", db.priv_module_data(module_id)?.submodules.keys());
     Ok(db.priv_module_data(module_id)?.submodules)
 }
 fn module_submodules_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<SubmoduleId>> {

@@ -16,6 +16,8 @@ use crate::db::RootDatabase;
 use crate::diagnostics::DiagnosticsReporter;
 use crate::project::{get_main_crate_ids_from_project, setup_project, ProjectConfig};
 
+use std::backtrace::Backtrace;
+
 pub mod db;
 pub mod diagnostics;
 pub mod project;
@@ -59,7 +61,8 @@ pub fn compile_cairo_project_at_path(
     path: &Path,
     compiler_config: CompilerConfig<'_>,
 ) -> Result<SierraProgram> {
-    let mut db = RootDatabase::builder().detect_corelib().build()?;
+    let mut db = RootDatabase::builder().detect_corelib().build()?; //build a hashmap of corelib
+    // println!("Custom backtrace: {}", Backtrace::capture());
     let main_crate_ids = setup_project(&mut db, path)?;
     compile_prepared_db(&mut db, main_crate_ids, compiler_config)
 }
