@@ -198,6 +198,19 @@ fn module_dir(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Directory> {
 /// Appends all the modules under the given module, including nested modules.
 fn collect_modules_under(db: &dyn DefsGroup, modules: &mut Vec<ModuleId>, module_id: ModuleId) {
     modules.push(module_id);
+
+    /*for sub_module_id in db.module_submodules_ids(module_id).unwrap_or_default().into_iter() {
+        let sub_module_file = db.module_main_file(ModuleId::Submodule(sub_module_id));
+        // match sub_module_file, if it is ok, print
+        match sub_module_file {
+            Ok(sub_module_file) => {
+                println!("defs collect_modules_under module_id: {:?} fileid:{:? } is  module_file: {:?}", sub_module_id, sub_module_file, sub_module_file.file_name(db.upcast()));
+            }
+            Err(e) => {
+                println!("defs collect_modules_under module_id: {:?} is  error: {:?}", sub_module_id, e);
+            }
+        }
+    }*/
     for submodule_module_id in db.module_submodules_ids(module_id).unwrap_or_default().into_iter() {
         collect_modules_under(db, modules, ModuleId::Submodule(submodule_module_id));
     }
@@ -207,11 +220,10 @@ fn collect_modules_under(db: &dyn DefsGroup, modules: &mut Vec<ModuleId>, module
 fn crate_modules(db: &dyn DefsGroup, crate_id: CrateId) -> Arc<Vec<ModuleId>> {
     let mut modules = Vec::new();
     println!("defs crate_modules: {:?}", crate_id);
-    
-    for module_id in db.module_submodules_ids(ModuleId::CrateRoot(crate_id)).unwrap_or_default().into_iter() {
-        println!("defs db sub module_id: {:?}", module_id);
-    }
-    collect_modules_under(db, &mut modules, ModuleId::CrateRoot(crate_id));
+    // print db's submodules
+    println!("defs db submodules: {:?} ", db.module_submodules_ids(ModuleId::CrateRoot(crate_id))); // TAG: alread have submodules.Why?
+
+    collect_modules_under(db, &mut modules, ModuleId::CrateRoot(crate_id)); // TAG: get all modules
     Arc::new(modules)
 }
 
@@ -272,7 +284,7 @@ pub struct ModuleData {
 fn priv_module_data(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<ModuleData> {
     let syntax_db = db.upcast();
     let module_file = db.module_main_file(module_id)?;
-    println!("priv_module_data module_id: {:?} is  module_file: {:?}", module_id, module_file);
+    // println!("defs priv_module_data module_id: {:?} is  module_file: {:?} module_file_name: {:?}", module_id, module_file, module_file.file_name(db.upcast()));
 
     let file_syntax = db.file_syntax(module_file)?;
     let mut main_file_info: Option<GeneratedFileInfo> = None;

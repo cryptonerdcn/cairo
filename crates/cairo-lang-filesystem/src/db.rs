@@ -11,6 +11,12 @@ use crate::ids::{CrateId, CrateLongId, Directory, FileId, FileLongId, FlagId, Fl
 use crate::span::{FileSummary, TextOffset, TextWidth};
 
 use std::backtrace::Backtrace;
+use std::io::Result;
+use rust_embed::RustEmbed;
+
+#[derive(RustEmbed)]
+#[folder = "corelib/src/"]
+struct Asset;
 
 #[cfg(test)]
 #[path = "db_test.rs"]
@@ -100,6 +106,7 @@ pub trait FilesGroupEx: Upcast<dyn FilesGroup> + AsFilesGroupMut {
             Some(root) => crate_roots.insert(crt, root),
             None => crate_roots.remove(&crt),
         };
+        println!("set_crate_root: {:?}", crate_roots);
         self.as_files_group_mut().set_crate_roots(Arc::new(crate_roots));
     }
     /// Sets the given flag value. None value removes the flag.
@@ -132,25 +139,44 @@ fn crate_root_dir(db: &dyn FilesGroup, crt: CrateId) -> Option<Directory> {
     db.crate_roots().get(&crt).cloned()
 }
 
-fn priv_raw_file_content(db: &dyn FilesGroup, file: FileId) -> Option<Arc<String>> {
-    // println!("Custom backtrace: {}", Backtrace::capture());
-    match db.lookup_intern_file(file) {
-        FileLongId::OnDisk(path) => match fs::read_to_string(path) {
-            Ok(content) => {
-                println!("File ID {:?} is {:?} \n FileEND \n", file, file.file_name(db));
+// read file and return a Result
+fn read_file_on_disk_or_wasm(path: PathBuf) -> Result<String> {
+    // println!("Reading file {:?}", path);
 
-                Some(Arc::new(content))
-            },
-            Err(_) => None,
+    let full_path_str = path.to_str().unwrap();  
+    if let Some(start) = full_path_str.find("corelib/src/") {
+        // Use slicing to get the part of the string after the target string
+        let remaining = &full_path_str[start + "corelib/src/".len()..];
+        // println!("{}", remaining);
+        let file = Asset::get(remaining).unwrap();
+        return Ok(std::str::from_utf8(file.data.as_ref()).unwrap().to_string());
+    }
+    println!("File not in the corelib");
+    return fs::read_to_string(path);
+    
+}
+
+
+fn priv_raw_file_content(db: &dyn FilesGroup, file: FileId) -> Option<Arc<String>> {
+
+    match db.lookup_intern_file(file) {
+        FileLongId::OnDisk(path) => {
+            match read_file_on_disk_or_wasm(path) {
+                Ok(content) => {
+                    // println!("Read file success. File ID {:?} is {:?} \n FileEND \n", file, file.file_name(db));
+                    /*if file.file_name(db) == "class_hash.cairo" { 
+                        log::warn!("Backtrace: {}", Backtrace::capture());
+                    }*/
+
+                    Some(Arc::new(content))
+                },
+                Err(_) => None,
+            }
         },
         FileLongId::Virtual(virt) => Some(virt.content),
     }
 }
 fn file_content(db: &dyn FilesGroup, file: FileId) -> Option<Arc<String>> {
-    // print files group
-    //println!("Crate roots: {:?}\n", db.crate_roots());
-    //print file id
-    //println!("File id: {:?}\n", file);
     let overrides = db.file_overrides();
     overrides.get(&file).cloned().or_else(|| db.priv_raw_file_content(file))
 }

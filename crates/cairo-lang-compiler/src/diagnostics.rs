@@ -112,17 +112,21 @@ impl<'a> DiagnosticsReporter<'a> {
             }
 
             // modify this code to return pathbuf
-            let pathF = match db.lookup_intern_file(module_file) {
+            let path_of_file = match db.lookup_intern_file(module_file) {
                 FileLongId::OnDisk(path) => path,
                 // return empty pathbuf when it is FileLongId::Virtual                
-                FileLongId::Virtual(virtual_file) => PathBuf::new(),
+                FileLongId::Virtual(virtual_file) => {
+                    println!("check virtual file: {:?}\n", virtual_file);
+                    PathBuf::new()},
             };
 
             // print db file content
-            println!("check module id {:?} name {:?} path {:?} \n file content: {:?}\n", module_file , module_file.file_name(db), pathF.display(), db.file_content(module_file));
-            
+            // println!("Check module id {:?} name {:?} path {:?} \n file content: {:?}\n", module_file , module_file.file_name(db), path_of_file.display(), db.file_content(module_file));
+            println!("Check module id {:?} name {:?} path {:?} \n", module_file , module_file.file_name(db), path_of_file.display());
             // TAG: call defs crate_modules()
             for module_id in &*db.crate_modules(crate_id) {
+                // println!("Check every module id: {:?} fullpath {:?} belong to {:?} name {:?} path {:?} \n", module_id, module_id.full_path(db), module_file , module_file.file_name(db), path_of_file.display());
+                
                 for file_id in db.module_files(*module_id).unwrap_or_default() {
                     let diag = db.file_syntax_diagnostics(file_id);
                     if !diag.get_all().is_empty() {
@@ -131,7 +135,7 @@ impl<'a> DiagnosticsReporter<'a> {
                     }
                 }
 
-                if let Ok(diag) = db.module_semantic_diagnostics(*module_id) {
+                if let Ok(diag) = db.module_semantic_diagnostics(*module_id) { // TAG: call module_semantic_diagnostics
                     if !diag.get_all().is_empty() {
                         found_diagnostics = true;
                         self.callback.on_diagnostic(diag.format(db));
@@ -152,7 +156,7 @@ impl<'a> DiagnosticsReporter<'a> {
     /// Checks if there are diagnostics and reports them to the provided callback as strings.
     /// Returns `Err` if diagnostics were found.
     pub fn ensure(&mut self, db: &RootDatabase) -> Result<(), DiagnosticsError> {
-        if self.check(db) { Err(DiagnosticsError) } else { Ok(()) }
+        if self.check(db) { Err(DiagnosticsError) } else { Ok(()) } // TAG: Check files
     }
 }
 

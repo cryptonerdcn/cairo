@@ -566,13 +566,14 @@ fn get_core_concrete_trait(
 }
 
 /// Given a core library trait name, returns [TraitId].
-pub fn get_core_trait(db: &dyn SemanticGroup, name: SmolStr) -> TraitId {
+pub fn get_core_trait(db: &dyn SemanticGroup, name: SmolStr) -> TraitId { // TAG get core trait
     let core_module = db.core_module();
     // This should not fail if the corelib is present.
     let use_id = extract_matches!(
         db.module_item_by_name(core_module, name).unwrap().unwrap(),
         ModuleItemId::Use
     );
+    // println!("use_id: {:?}", use_id.name(db.upcast()));
     let trait_id =
         extract_matches!(db.use_resolved_item(use_id).unwrap(), ResolvedGenericItem::Trait);
     trait_id

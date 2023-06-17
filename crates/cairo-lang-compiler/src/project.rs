@@ -2,11 +2,30 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use cairo_lang_defs::ids::ModuleId;
+use cairo_lang_defs::ids::{ModuleId, ModuleItemId};
 use cairo_lang_filesystem::db::FilesGroupEx;
 use cairo_lang_filesystem::ids::{CrateId, CrateLongId, Directory};
 pub use cairo_lang_project::*;
 use cairo_lang_semantic::db::SemanticGroup;
+
+#[macro_export]
+macro_rules! extract_matches {
+    ($e:expr, $variant:path) => {
+        match $e {
+            $variant(x) => x,
+            ref e => {
+                panic!("Variant extract failed: `{:?}` is not of variant `{}`", e, stringify!($variant))
+            }
+        }
+    };
+    ( $e:expr , $variant:path , $($arg:tt)* ) => {
+        match $e {
+            $variant(x) => x,
+            ref e => panic!("Variant extract failed: `{:?}` is not of variant `{}`: {}",
+                e, stringify!($variant), format_args!($($arg)*))
+        }
+    };
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum ProjectError {
@@ -26,6 +45,9 @@ fn setup_single_file_project(
     db: &mut dyn SemanticGroup,
     path: &Path,
 ) -> Result<CrateId, ProjectError> {
+    //print path
+    println!("setup_single_file_project path: {:?}", path);
+
     match path.extension().and_then(OsStr::to_str) {
         Some("cairo") => (),
         _ => {
@@ -55,6 +77,43 @@ fn setup_single_file_project(
             .override_file_content(file_id, Some(Arc::new(format!("mod {file_stem};"))));
         Ok(crate_id)
     }
+}
+
+/// Setup to 'db' to compile the file at the given path.
+/// Returns the id of the generated crate.
+fn setup_single_file_project_with_input_string(
+    db: &mut dyn SemanticGroup,
+    path: &Path,
+    input: &String,
+) -> Result<CrateId, ProjectError> {
+    //print path
+    println!("setup_single_file_project_with_string path: {:?}", path);
+
+    /*if !path.exists() {
+        return Err(ProjectError::NoSuchFile { path: path.to_string_lossy().to_string() });
+    }*/
+    
+    let file_stem = "astro";
+
+    // If file_stem is not lib, create a fake lib file.
+    let crate_id = db.intern_crate(CrateLongId(file_stem.into()));
+    db.set_crate_root(crate_id, Some(Directory(path.parent().unwrap().to_path_buf())));
+
+    let module_id = ModuleId::CrateRoot(crate_id);
+    let file_id = db.module_main_file(module_id).unwrap(); // Create module_main_file . It is lib.cairo file
+    db.as_files_group_mut()
+            .override_file_content(file_id, Some(Arc::new(format!("mod {file_stem};"))));
+    println!("module_id: {:?} file_id: {:?} file name: {:?}", module_id, file_id, file_id.file_name(db.upcast()));
+    
+    let item_id =
+    extract_matches!(db.module_items(module_id).ok().unwrap()[0], ModuleItemId::Submodule);
+    let submodule_id = ModuleId::Submodule(item_id);
+    let sub_file_id = db.module_main_file(submodule_id).unwrap();
+    println!("submodule_id: {:?} full path: {:?} fileid: {:?} name: {:?}", submodule_id, submodule_id.full_path(db.upcast()), sub_file_id, sub_file_id.file_name(db.upcast()));
+    db.as_files_group_mut()
+            .override_file_content(sub_file_id, Some(Arc::new(input.clone())));
+
+    Ok(crate_id)
 }
 
 /// Updates the crate roots from a ProjectConfig object.
@@ -89,6 +148,14 @@ pub fn setup_project(
     } else {
         Ok(vec![setup_single_file_project(db, path)?])
     }
+}
+
+pub fn setup_project_with_input_string(
+    db: &mut dyn SemanticGroup,
+    path: &Path,
+    input: &String,
+) -> Result<Vec<CrateId>, ProjectError> {
+    Ok(vec![setup_single_file_project_with_input_string(db, path, input)?])
 }
 
 pub fn get_main_crate_ids_from_project(
