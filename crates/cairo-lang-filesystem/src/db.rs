@@ -10,7 +10,6 @@ use crate::flag::Flag;
 use crate::ids::{CrateId, CrateLongId, Directory, FileId, FileLongId, FlagId, FlagLongId};
 use crate::span::{FileSummary, TextOffset, TextWidth};
 
-use std::backtrace::Backtrace;
 use std::io::Result;
 use rust_embed::RustEmbed;
 
