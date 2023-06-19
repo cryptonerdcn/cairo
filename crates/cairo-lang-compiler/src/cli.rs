@@ -14,13 +14,13 @@ use salsa::plumbing::InputQueryStorageOps;
 struct Args {
     /// The file to compile
     path: PathBuf,
-    /// The input file string (default: stdin).
-    input: Option<String>,
     /// The output file name (default: stdout).
     output: Option<String>,
     /// Replaces sierra ids with human-readable ones.
     #[arg(short, long, default_value_t = false)]
     replace_ids: bool,
+    /// The input file string (default: stdin).
+    input: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
