@@ -41,11 +41,12 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     match args.input_program_string {
         Some(input) => {
-            return run_with_input_program_string(
-                input,
+            let _result_string = run_with_input_program_string(
+                &input,
                 args.available_gas,
                 args.print_full_memory,
             );
+            return Ok(());
         }
         None => {
             let db = &mut RootDatabase::builder().detect_corelib().build()?;

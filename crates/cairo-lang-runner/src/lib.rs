@@ -481,7 +481,7 @@ fn create_metadata(
     }
 }
 
-pub fn run_with_input_program_string(input_program_string: String, available_gas: Option<usize>, print_full_memory: bool) -> Result<()> {
+pub fn run_with_input_program_string(input_program_string: &String, available_gas: Option<usize>, print_full_memory: bool) -> Result<String> {
 
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
 
@@ -526,33 +526,50 @@ pub fn run_with_input_program_string(input_program_string: String, available_gas
             StarknetState::default(),
         ).map_err(|err| Error::msg(err.to_string()))?;
         //with_context(|| "Failed to run the function.")?;
+    let mut result_string = String::new();
     match result.value {
         RunResultValue::Success(values) => {
-            println!("Run completed successfully, returning {values:?}")
+            println!("Run completed successfully, returning {values:?}");
+            result_string.push_str(&format!("Run completed successfully, returning {values:?}\n", values=values))
         }
         RunResultValue::Panic(values) => {
-            print!("Run panicked with [");
+            // print!("Run panicked with [");
+            result_string.push_str(&format!("Run panicked with ["));
             for value in &values {
                 match as_cairo_short_string(value) {
-                    Some(as_string) => print!("{value} ('{as_string}'), "),
-                    None => print!("{value}, "),
+                    Some(as_string) => {
+                    print!("{} ('{}'), ", value, as_string);
+                    result_string.push_str(&format!("{value} ('{as_string}'), ", value=value, as_string=as_string))
+                    }
+                    None => {
+                    print!("{}, ", value);
+                    result_string.push_str(&format!("{value}, ", value=value))
+                    }
                 }
             }
-            println!("].")
+            println!("].");
+            result_string.push_str(&format!("].\n"))
         }
     }
     if let Some(gas) = result.gas_counter {
         println!("Remaining gas: {gas}");
+        result_string.push_str(&format!("Remaining gas: {gas}\n", gas=gas));
     }
     if print_full_memory {
         print!("Full memory: [");
+        result_string.push_str(&format!("Full memory: ["));
         for cell in &result.memory {
             match cell {
-                None => print!("_, "),
-                Some(value) => print!("{value}, "),
+                None => {
+                    print!("_, ");
+                result_string.push_str(&format!("_, "))},
+                Some(value) => {
+                    print!("{value}, ");
+                result_string.push_str(&format!("{value}, ", value=value))}
             }
         }
         println!("]");
+        result_string.push_str(&format!("]\n"))
     }
-    Ok(())
+    Ok(result_string)
 }
