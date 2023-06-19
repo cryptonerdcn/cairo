@@ -87,9 +87,9 @@ impl<'a> DiagnosticsReporter<'a> {
     pub fn check(&mut self, db: &RootDatabase) -> bool {
         let mut found_diagnostics = false;
         // print db crates 
-        for crate_id in db.crates() {
+        /*for crate_id in db.crates() {
             println!("check crateid : {:?} moduleid: {:?} mainfile: {:?}\n", crate_id, ModuleId::CrateRoot(crate_id), db.module_main_file(ModuleId::CrateRoot(crate_id)));
-        }
+        }*/
 
         for crate_id in db.crates() {
             // TAG: get lib.cairo here
@@ -112,17 +112,17 @@ impl<'a> DiagnosticsReporter<'a> {
             }
 
             // modify this code to return pathbuf
-            let path_of_file = match db.lookup_intern_file(module_file) {
+            /*let _path_of_file = match db.lookup_intern_file(module_file) {
                 FileLongId::OnDisk(path) => path,
                 // return empty pathbuf when it is FileLongId::Virtual                
                 FileLongId::Virtual(virtual_file) => {
                     println!("check virtual file: {:?}\n", virtual_file);
                     PathBuf::new()},
-            };
+            };*/
 
             // print db file content
             // println!("Check module id {:?} name {:?} path {:?} \n file content: {:?}\n", module_file , module_file.file_name(db), path_of_file.display(), db.file_content(module_file));
-            println!("Check module id {:?} name {:?} path {:?} \n", module_file , module_file.file_name(db), path_of_file.display());
+            // println!("Check module id {:?} name {:?} path {:?} \n", module_file , module_file.file_name(db), path_of_file.display());
             // TAG: call defs crate_modules()
             for module_id in &*db.crate_modules(crate_id) {
                 // println!("Check every module id: {:?} fullpath {:?} belong to {:?} name {:?} path {:?} \n", module_id, module_id.full_path(db), module_file , module_file.file_name(db), path_of_file.display());

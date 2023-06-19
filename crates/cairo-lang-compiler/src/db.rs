@@ -121,7 +121,6 @@ impl RootDatabaseBuilder {
         if self.detect_corelib {
             let path =
                 detect_dummy_corelib().ok_or_else(|| anyhow!("Failed to find development corelib."))?;
-            println!("Core is {:?}\n", path.display());
             init_dev_corelib(&mut db, path);
         }
 

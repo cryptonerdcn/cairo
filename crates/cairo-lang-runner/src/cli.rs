@@ -7,6 +7,7 @@ use cairo_lang_compiler::db::RootDatabase;
 use cairo_lang_compiler::diagnostics::DiagnosticsReporter;
 use cairo_lang_compiler::project::setup_project;
 use cairo_lang_diagnostics::ToOption;
+use cairo_lang_filesystem::log_ds::LogDatabase;
 use cairo_lang_runner::run_with_input_program_string;
 use cairo_lang_runner::short_string::as_cairo_short_string;
 use cairo_lang_runner::{SierraCasmRunner, StarknetState};
@@ -95,6 +96,8 @@ fn main() -> anyhow::Result<()> {
                 )
                 .map_err(|err| Error::msg(err.to_string()))?;
                 //.with_context(|| "Failed to run the function.")?;
+
+            println!("{}.", LogDatabase::get_file_text("log_file".to_string()));
             match result.value {
                 cairo_lang_runner::RunResultValue::Success(values) => {
                     println!("Run completed successfully, returning {values:?}")

@@ -103,13 +103,13 @@ fn setup_single_file_project_with_input_string(
     let file_id = db.module_main_file(module_id).unwrap(); // Create module_main_file . It is lib.cairo file
     db.as_files_group_mut()
             .override_file_content(file_id, Some(Arc::new(format!("mod {file_stem};"))));
-    println!("module_id: {:?} file_id: {:?} file name: {:?}", module_id, file_id, file_id.file_name(db.upcast()));
+    // println!("module_id: {:?} file_id: {:?} file name: {:?}", module_id, file_id, file_id.file_name(db.upcast()));
     
     let item_id =
     extract_matches!(db.module_items(module_id).ok().unwrap()[0], ModuleItemId::Submodule);
     let submodule_id = ModuleId::Submodule(item_id);
     let sub_file_id = db.module_main_file(submodule_id).unwrap();
-    println!("submodule_id: {:?} full path: {:?} fileid: {:?} name: {:?}", submodule_id, submodule_id.full_path(db.upcast()), sub_file_id, sub_file_id.file_name(db.upcast()));
+    // println!("submodule_id: {:?} full path: {:?} fileid: {:?} name: {:?}", submodule_id, submodule_id.full_path(db.upcast()), sub_file_id, sub_file_id.file_name(db.upcast()));
     db.as_files_group_mut()
             .override_file_content(sub_file_id, Some(Arc::new(input.clone())));
 

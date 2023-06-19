@@ -219,9 +219,9 @@ fn collect_modules_under(db: &dyn DefsGroup, modules: &mut Vec<ModuleId>, module
 /// Returns all the modules in the crate, including recursively.
 fn crate_modules(db: &dyn DefsGroup, crate_id: CrateId) -> Arc<Vec<ModuleId>> {
     let mut modules = Vec::new();
-    println!("defs crate_modules: {:?}", crate_id);
+    // println!("defs crate_modules: {:?}", crate_id);
     // print db's submodules
-    println!("defs db submodules: {:?} ", db.module_submodules_ids(ModuleId::CrateRoot(crate_id))); // TAG: alread have submodules.Why?
+    // println!("defs db submodules: {:?} ", db.module_submodules_ids(ModuleId::CrateRoot(crate_id))); // TAG: alread have submodules.Why?
 
     collect_modules_under(db, &mut modules, ModuleId::CrateRoot(crate_id)); // TAG: get all modules
     Arc::new(modules)

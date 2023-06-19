@@ -1,11 +1,12 @@
 use std::any::Any;
+use std::backtrace::Backtrace;
 use std::ops::{Deref, Shl};
 
 #[cfg(feature = "std")]
 use std::collections::HashMap;
+use cairo_lang_filesystem::log_ds::LogDatabase;
 #[cfg(all(not(feature = "std"), feature = "alloc"))]
 use cairo_vm::with_alloc::collections::HashMap;
-
 use ark_ff::fields::{Fp256, MontBackend, MontConfig};
 use ark_ff::{Field, PrimeField};
 use ark_std::UniformRand;
@@ -1254,18 +1255,29 @@ pub fn execute_core_hint(
                 let (base, offset) = extract_buffer(value);
                 get_ptr(vm, base, &offset)
             };
+            let mut debug_string = String::new();
             let mut curr = as_relocatable(vm, start)?;
             let end = as_relocatable(vm, end)?;
             while curr != end {
                 let value = vm.get_integer(curr)?;
                 if let Some(shortstring) = as_cairo_short_string(&value) {
                     println!("[DEBUG]\t{shortstring: <31}\t(raw: {value: <31})");
+                    // push_str to debug_string
+                    debug_string.push_str(&format!("[DEBUG]\t{shortstring: <31}\t(raw: {value: <31})", shortstring = shortstring, value = value));
                 } else {
                     println!("[DEBUG]\t{0: <31}\t(raw: {value: <31}) ", ' ');
+                    // push_str to debug_string
+                    debug_string.push_str(&format!("[DEBUG]\t{0: <31}\t(raw: {value: <31}) ", ' ', value = value));
                 }
                 curr += 1;
             }
             println!();
+            // push_str to debug_string
+            debug_string.push_str(&format!("\n"));
+
+            // use backtrace
+            // println!("Custom backtrace: {}", Backtrace::force_capture());
+            LogDatabase::append_file_text( "log_file".to_string(), debug_string);
         }
         CoreHint::AllocConstantSize { size, dst } => {
             let object_size = get_val(vm, size)?.to_usize().expect("Object size too large.");
@@ -1375,6 +1387,8 @@ pub fn run_function<'a, 'b: 'a, Instructions: Iterator<Item = &'a Instruction> +
     let end = runner.initialize(&mut vm).map_err(VirtualMachineError::from).map_err(Box::new)?;
 
     additional_initialization(RunFunctionContext { vm: &mut vm, data_len })?;
+
+    LogDatabase::create_file_text( "log_file".to_string(), "Wasm-Cairo Debug outputs: \n".to_string());
 
     runner.run_until_pc(end, &mut vm, &mut hint_processor)?;
     runner.end_run(true, false, &mut vm, &mut hint_processor).map_err(Box::new)?;

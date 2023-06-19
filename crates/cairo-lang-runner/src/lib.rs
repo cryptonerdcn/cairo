@@ -6,6 +6,7 @@ use thiserror::Error;
 #[cfg(all(not(feature = "std"), feature = "alloc"))]
 use thiserror_no_std::Error;
 
+use cairo_lang_filesystem::log_ds::LogDatabase;
 use anyhow::{Context, Result, Error};
 use cairo_felt::Felt252;
 use cairo_lang_casm::instructions::Instruction;
@@ -527,6 +528,8 @@ pub fn run_with_input_program_string(input_program_string: &String, available_ga
         ).map_err(|err| Error::msg(err.to_string()))?;
         //with_context(|| "Failed to run the function.")?;
     let mut result_string = String::new();
+    println!("{}", LogDatabase::get_file_text("log_file".to_string()));
+    result_string.push_str(&format!("{log:?}", log = LogDatabase::get_file_text("log_file".to_string())));
     match result.value {
         RunResultValue::Success(values) => {
             println!("Run completed successfully, returning {values:?}");

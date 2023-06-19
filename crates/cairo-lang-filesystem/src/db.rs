@@ -105,7 +105,7 @@ pub trait FilesGroupEx: Upcast<dyn FilesGroup> + AsFilesGroupMut {
             Some(root) => crate_roots.insert(crt, root),
             None => crate_roots.remove(&crt),
         };
-        println!("set_crate_root: {:?}", crate_roots);
+        // println!("set_crate_root: {:?}", crate_roots);
         self.as_files_group_mut().set_crate_roots(Arc::new(crate_roots));
     }
     /// Sets the given flag value. None value removes the flag.
