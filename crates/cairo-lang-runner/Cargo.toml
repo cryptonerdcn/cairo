@@ -7,7 +7,6 @@ license-file.workspace = true
 description = "Basic cairo runner."
 
 [dependencies]
-anyhow.workspace = true
 ark-ff.workspace = true
 ark-std.workspace = true
 cairo-felt.workspace = true
@@ -25,7 +24,8 @@ cairo-lang-sierra-generator = { path = "../cairo-lang-sierra-generator", version
 cairo-lang-sierra-to-casm = { path = "../cairo-lang-sierra-to-casm", version = "1.1.0" }
 cairo-lang-starknet = { path = "../cairo-lang-starknet", version = "1.1.0" }
 cairo-lang-utils = { path = "../cairo-lang-utils", version = "1.1.0" }
-cairo-vm.workspace = true
+cairo-vm = { version = "0.3.0-rc1", features = ["alloc"], default-features = false }
+# cairo-vm = { version = "0.3.0-rc1", default-features = true }
 clap.workspace = true
 itertools.workspace = true
 keccak.workspace = true
@@ -38,6 +38,63 @@ thiserror.workspace = true
 [dev-dependencies]
 pretty_assertions.workspace = true
 test-case.workspace = true
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+default-features = false
+
+[dependencies.serde_bytes]
+version = "0.11.9"
+default-features = false
+
+[dependencies.serde_json]
+version = "1.0"
+features = ["arbitrary_precision"]
+default-features = false
+
+[dependencies.starknet-crypto]
+version = "0.4.2"
+features = ["signature-display"]
+default-features = false
+
+[dependencies.thiserror-no-std]
+version = "2.0.2"
+
+[dependencies.parse-hyperlinks]
+version = "0.24.2-rc1"
+default-features = false
+package = "cairo-take_until_unbalanced"
+
+[dependencies.bincode]
+version = "2.0.0-rc.2"
+features = ["serde"]
+default-features = false
+
+[dependencies.anyhow]
+version = "1.0.69"
+default-features = false
+
+[features]
+alloc = [
+    "serde_json/alloc",
+    "serde_bytes/alloc",
+    "starknet-crypto/alloc",
+    "parse-hyperlinks/alloc",
+]
+default = [
+    "std",
+]
+hooks = []
+skip_next_instruction_hint = []
+std = [
+    "serde_json/std",
+    "serde_bytes/std",
+    "bincode/std",
+    "anyhow/std",
+    "starknet-crypto/std",
+    "parse-hyperlinks/std",
+]
 
 [[bin]]
 name = "cairo-run"

@@ -1,8 +1,12 @@
 //! Basic runner for running a Sierra program on the vm.
 use std::collections::HashMap;
 use std::path::Path;
+#[cfg(feature = "std")]
+use thiserror::Error;
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
+use thiserror_no_std::Error;
 
-use anyhow::Context;
+use anyhow::{Context, Result, Error};
 use cairo_felt::Felt252;
 use cairo_lang_casm::instructions::Instruction;
 use cairo_lang_casm::{casm, casm_extend};
@@ -39,7 +43,6 @@ use cairo_vm::vm::errors::vm_errors::VirtualMachineError;
 pub use casm_run::StarknetState;
 use itertools::chain;
 use num_traits::ToPrimitive;
-use thiserror::Error;
 
 use crate::short_string::as_cairo_short_string;
 
@@ -68,6 +71,8 @@ pub enum RunnerError {
     ApChangeError(#[from] ApChangeError),
     #[error(transparent)]
     VirtualMachineError(#[from] Box<VirtualMachineError>),
+    #[error(transparent)]
+    Other(anyhow::Error),
 }
 
 /// The full result of a run.
@@ -476,7 +481,7 @@ fn create_metadata(
     }
 }
 
-pub fn run_with_input_program_string(input_program_string: String, available_gas: Option<usize>, print_full_memory: bool) -> anyhow::Result<()> {
+pub fn run_with_input_program_string(input_program_string: String, available_gas: Option<usize>, print_full_memory: bool) -> Result<()> {
 
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
 
@@ -511,16 +516,16 @@ pub fn run_with_input_program_string(input_program_string: String, available_gas
         replacer.apply(&sierra_program),
         if available_gas.is_some() { Some(Default::default()) } else { None },
         contracts_info,
-    )
-    .with_context(|| "Failed setting up runner.")?;
+    ).map_err(|err| Error::msg(err.to_string()))?;
+    //.with_context(|| "Failed setting up runner.")?;
     let result = runner
         .run_function(
-            runner.find_function("::main")?,
+            runner.find_function("::main").map_err(|err| Error::msg(err.to_string()))?,
             &[],
             available_gas,
             StarknetState::default(),
-        )
-        .with_context(|| "Failed to run the function.")?;
+        ).map_err(|err| Error::msg(err.to_string()))?;
+        //with_context(|| "Failed to run the function.")?;
     match result.value {
         RunResultValue::Success(values) => {
             println!("Run completed successfully, returning {values:?}")

@@ -1,6 +1,10 @@
 use std::any::Any;
-use std::collections::HashMap;
 use std::ops::{Deref, Shl};
+
+#[cfg(feature = "std")]
+use std::collections::HashMap;
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
+use cairo_vm::with_alloc::collections::HashMap;
 
 use ark_ff::fields::{Fp256, MontBackend, MontConfig};
 use ark_ff::{Field, PrimeField};
