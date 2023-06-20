@@ -482,7 +482,7 @@ fn create_metadata(
     }
 }
 
-pub fn run_with_input_program_string(input_program_string: &String, available_gas: Option<usize>, print_full_memory: bool) -> Result<String> {
+pub fn run_with_input_program_string(input_program_string: &String, available_gas: Option<usize>, print_full_memory: bool, use_dbg_print_hint: bool) -> Result<String> {
 
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
 
@@ -528,8 +528,12 @@ pub fn run_with_input_program_string(input_program_string: &String, available_ga
         ).map_err(|err| Error::msg(err.to_string()))?;
         //with_context(|| "Failed to run the function.")?;
     let mut result_string = String::new();
-    println!("{}\n", LogDatabase::get_file_text("log_file".to_string()));
-    result_string.push_str(&format!("{}", LogDatabase::get_file_text("log_file".to_string())));
+    
+    if use_dbg_print_hint {
+        println!("{}\n", LogDatabase::get_file_text("log_file".to_string()));
+        result_string.push_str(&format!("{}", LogDatabase::get_file_text("log_file".to_string())));
+    }
+
     match result.value {
         RunResultValue::Success(values) => {
             println!("Run completed successfully, returning {values:?}");
