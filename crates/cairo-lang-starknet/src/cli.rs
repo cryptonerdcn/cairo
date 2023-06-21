@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use cairo_lang_compiler::CompilerConfig;
 use cairo_lang_starknet::allowed_libfuncs::ListSelector;
-use cairo_lang_starknet::contract_class::starknet_compile;
+use cairo_lang_starknet::contract_class::{starknet_compile, starknet_compile_with_input_string};
 use clap::Parser;
 
 /// Command line args parser.
@@ -28,6 +28,9 @@ struct Args {
     /// A file of the allowed libfuncs list to use.
     #[arg(long)]
     allowed_libfuncs_list_file: Option<String>,
+    /// Input starknet contract string
+    #[arg(long)]
+    input_program_string: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -35,12 +38,27 @@ fn main() -> anyhow::Result<()> {
     let list_selector =
         ListSelector::new(args.allowed_libfuncs_list_name, args.allowed_libfuncs_list_file)
             .expect("Both allowed libfunc list name and file were supplied.");
-    let res = starknet_compile(
-        args.path,
-        args.contract_path,
-        Some(CompilerConfig { replace_ids: args.replace_ids, ..CompilerConfig::default() }),
-        Some(list_selector),
-    )?;
+
+    let res = match args.input_program_string {
+        Some(_) => {
+            starknet_compile_with_input_string(
+                args.path,
+                args.contract_path,
+                Some(CompilerConfig { replace_ids: args.replace_ids, ..CompilerConfig::default() }),
+                Some(list_selector),
+                &args.input_program_string.unwrap(),
+            )?
+        },
+        None => {
+            starknet_compile(
+                args.path,
+                args.contract_path,
+                Some(CompilerConfig { replace_ids: args.replace_ids, ..CompilerConfig::default() }),
+                Some(list_selector),
+            )?
+        }
+    };
+    
     match args.output {
         Some(path) => fs::write(path, res).with_context(|| "Failed to write output.")?,
         None => println!("{res}"),
