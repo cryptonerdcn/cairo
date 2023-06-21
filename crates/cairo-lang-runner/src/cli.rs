@@ -46,6 +46,7 @@ fn main() -> anyhow::Result<()> {
                 &input,
                 args.available_gas,
                 args.print_full_memory,
+                false
             );
             return Ok(());
         }
@@ -128,81 +129,5 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
-
-    /*
-    let db = &mut RootDatabase::builder().detect_corelib().build()?;
-
-    let main_crate_ids = match args.input_program_string {
-        Some(input) => setup_project_with_input_string(db, Path::new(&args.path), &input)?,
-        None => setup_project(db, Path::new(&args.path))?,
-        };
-
-    if DiagnosticsReporter::stderr().check(db) {
-        anyhow::bail!("failed to compile: {}", args.path);
-    }
-
-    let sierra_program = db
-        .get_sierra_program(main_crate_ids.clone())
-        .to_option()
-        .with_context(|| "Compilation failed without any diagnostics.")?;
-    let replacer = DebugReplacer { db };
-    if args.available_gas.is_none()
-        && sierra_program.type_declarations.iter().any(|decl| {
-            matches!(
-                decl.long_id.generic_id.0.as_str(),
-                WithdrawGasLibfunc::STR_ID
-                    | BuiltinCostWithdrawGasLibfunc::STR_ID
-                    | RedepositGasLibfunc::STR_ID
-            )
-        })
-    {
-        anyhow::bail!("Program requires gas counter, please provide `--available_gas` argument.");
-    }
-
-    let contracts_info = get_contracts_info(db, main_crate_ids, &replacer)?;
-
-    let runner = SierraCasmRunner::new(
-        replacer.apply(&sierra_program),
-        if args.available_gas.is_some() { Some(Default::default()) } else { None },
-        contracts_info,
-    )
-    .with_context(|| "Failed setting up runner.")?;
-    let result = runner
-        .run_function(
-            runner.find_function("::main")?,
-            &[],
-            args.available_gas,
-            StarknetState::default(),
-        )
-        .with_context(|| "Failed to run the function.")?;
-    match result.value {
-        cairo_lang_runner::RunResultValue::Success(values) => {
-            println!("Run completed successfully, returning {values:?}")
-        }
-        cairo_lang_runner::RunResultValue::Panic(values) => {
-            print!("Run panicked with [");
-            for value in &values {
-                match as_cairo_short_string(value) {
-                    Some(as_string) => print!("{value} ('{as_string}'), "),
-                    None => print!("{value}, "),
-                }
-            }
-            println!("].")
-        }
-    }
-    if let Some(gas) = result.gas_counter {
-        println!("Remaining gas: {gas}");
-    }
-    if args.print_full_memory {
-        print!("Full memory: [");
-        for cell in &result.memory {
-            match cell {
-                None => print!("_, "),
-                Some(value) => print!("{value}, "),
-            }
-        }
-        println!("]");
-    }*/
-
     Ok(())
 }

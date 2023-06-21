@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::backtrace::Backtrace;
 use std::ops::{Deref, Shl};
 
 #[cfg(feature = "std")]

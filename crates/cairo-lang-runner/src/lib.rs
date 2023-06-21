@@ -527,6 +527,12 @@ pub fn run_with_input_program_string(input_program_string: &String, available_ga
             StarknetState::default(),
         ).map_err(|err| Error::msg(err.to_string()))?;
         //with_context(|| "Failed to run the function.")?;
+    
+    generate_run_result_log(&result, print_full_memory, use_dbg_print_hint)
+    
+}
+
+fn generate_run_result_log(result: &RunResult, print_full_memory: bool, use_dbg_print_hint: bool) -> Result<String>  {
     let mut result_string = String::new();
     
     if use_dbg_print_hint {
@@ -534,7 +540,7 @@ pub fn run_with_input_program_string(input_program_string: &String, available_ga
         result_string.push_str(&format!("{}", LogDatabase::get_file_text("log_file".to_string())));
     }
 
-    match result.value {
+    match &result.value {
         RunResultValue::Success(values) => {
             println!("Run completed successfully, returning {values:?}");
             result_string.push_str(&format!("Run completed successfully, returning {values:?}\n", values=values))
@@ -542,7 +548,7 @@ pub fn run_with_input_program_string(input_program_string: &String, available_ga
         RunResultValue::Panic(values) => {
             // print!("Run panicked with [");
             result_string.push_str(&format!("Run panicked with ["));
-            for value in &values {
+            for value in values {
                 match as_cairo_short_string(value) {
                     Some(as_string) => {
                     print!("{} ('{}'), ", value, as_string);
@@ -558,7 +564,7 @@ pub fn run_with_input_program_string(input_program_string: &String, available_ga
             result_string.push_str(&format!("].\n"))
         }
     }
-    if let Some(gas) = result.gas_counter {
+    if let Some(gas) = &result.gas_counter {
         println!("Remaining gas: {gas}");
         result_string.push_str(&format!("Remaining gas: {gas}\n", gas=gas));
     }
@@ -579,4 +585,5 @@ pub fn run_with_input_program_string(input_program_string: &String, available_ga
         result_string.push_str(&format!("]\n"))
     }
     Ok(result_string)
+
 }

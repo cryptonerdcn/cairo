@@ -9,8 +9,6 @@ use thiserror::Error;
 
 use crate::db::RootDatabase;
 
-use std::path::PathBuf;
-
 #[cfg(test)]
 #[path = "diagnostics_test.rs"]
 mod test;
