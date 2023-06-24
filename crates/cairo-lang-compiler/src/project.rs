@@ -86,8 +86,7 @@ fn setup_single_file_project_with_input_string(
     path: &Path,
     input: &String,
 ) -> Result<CrateId, ProjectError> {
-    //print path
-    println!("setup_single_file_project_with_string path: {:?}", path);
+    // println!("setup_single_file_project_with_string path: {:?}", path);
 
     /*if !path.exists() {
         return Err(ProjectError::NoSuchFile { path: path.to_string_lossy().to_string() });

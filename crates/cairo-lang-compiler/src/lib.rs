@@ -69,7 +69,7 @@ pub fn compile_cairo_project_with_input_string(
     input: &String,
     compiler_config: CompilerConfig<'_>,
 ) -> Result<SierraProgram> {
-    println!("compile_cairo_project_with_input_string");
+    // println!("compile_cairo_project_with_input_string");
     let mut db = RootDatabase::builder().detect_corelib().build()?; //build a hashmap of corelib
     let main_crate_ids = setup_project_with_input_string(&mut db, path, input)?; // Set up need to build file
     compile_prepared_db(&mut db, main_crate_ids, compiler_config)
