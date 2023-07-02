@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Ok};
 use cairo_lang_compiler::db::RootDatabase;
 use cairo_lang_compiler::diagnostics::DiagnosticsReporter;
-use cairo_lang_compiler::project::{check_compiler_path, setup_project};
+use cairo_lang_compiler::project::{
+    check_compiler_path, setup_project, setup_project_with_input_string,
+};
 use cairo_lang_diagnostics::ToOption;
 use cairo_lang_runner::short_string::as_cairo_short_string;
 use cairo_lang_runner::{SierraCasmRunner, StarknetState};
@@ -34,6 +36,9 @@ struct Args {
     /// Whether to print the memory.
     #[arg(long, default_value_t = false)]
     print_full_memory: bool,
+    /// Input cairo program string
+    #[arg(long)]
+    input_program_string: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -44,7 +49,10 @@ fn main() -> anyhow::Result<()> {
 
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
 
-    let main_crate_ids = setup_project(db, Path::new(&args.path))?;
+    let main_crate_ids = match args.input_program_string {
+        Some(input) => setup_project_with_input_string(db, Path::new(&args.path), &input)?,
+        None => setup_project(db, Path::new(&args.path))?,
+        };
 
     if DiagnosticsReporter::stderr().check(db) {
         anyhow::bail!("failed to compile: {}", args.path.display());

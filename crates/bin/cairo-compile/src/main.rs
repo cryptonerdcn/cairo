@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use cairo_lang_compiler::project::check_compiler_path;
-use cairo_lang_compiler::{compile_cairo_project_at_path, CompilerConfig};
+use cairo_lang_compiler::{
+    compile_cairo_project_at_path, compile_cairo_project_with_input_string, CompilerConfig,
+};
 use cairo_lang_utils::logging::init_logging;
 use clap::Parser;
 
@@ -22,6 +24,8 @@ struct Args {
     /// Replaces sierra ids with human-readable ones.
     #[arg(short, long, default_value_t = false)]
     replace_ids: bool,
+    /// The input file string (default: stdin).
+    input: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,10 +37,17 @@ fn main() -> anyhow::Result<()> {
     // Check if args.path is a file or a directory.
     check_compiler_path(args.single_file, &args.path)?;
 
-    let sierra_program = compile_cairo_project_at_path(
-        &args.path,
-        CompilerConfig { replace_ids: args.replace_ids, ..CompilerConfig::default() },
-    )?;
+    let sierra_program = match args.input.as_ref() {
+        Some(input) => compile_cairo_project_with_input_string(
+            &args.path,
+            input,
+            CompilerConfig { replace_ids: args.replace_ids, ..CompilerConfig::default() },
+        )?,
+        None => compile_cairo_project_at_path(
+            &args.path,
+            CompilerConfig { replace_ids: args.replace_ids, ..CompilerConfig::default() },
+        )?,
+    };
 
     match args.output {
         Some(path) => {
