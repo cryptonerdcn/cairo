@@ -2,11 +2,12 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use cairo_lang_defs::ids::ModuleId;
+use cairo_lang_defs::ids::{ModuleId, ModuleItemId};
 use cairo_lang_filesystem::db::FilesGroupEx;
 use cairo_lang_filesystem::ids::{CrateId, CrateLongId, Directory};
 pub use cairo_lang_project::*;
 use cairo_lang_semantic::db::SemanticGroup;
+use cairo_lang_utils::extract_matches;
 
 #[derive(thiserror::Error, Debug)]
 pub enum ProjectError {
@@ -101,4 +102,50 @@ pub fn get_main_crate_ids_from_project(
         .keys()
         .map(|crate_id| db.intern_crate(CrateLongId(crate_id.clone())))
         .collect()
+}
+
+
+/// Setup the 'db' to compile the project in the given string.
+/// Returns the ids of the project crates.
+pub fn setup_project_with_input_string(
+    db: &mut dyn SemanticGroup,
+    path: &Path,
+    input: &String,
+) -> Result<Vec<CrateId>, ProjectError> {
+    Ok(vec![setup_single_file_project_with_input_string(db, path, input)?])
+}
+
+/// Setup to 'db' to compile the file at the given path.
+/// Returns the id of the generated crate.
+fn setup_single_file_project_with_input_string(
+    db: &mut dyn SemanticGroup,
+    path: &Path,
+    input: &String,
+) -> Result<CrateId, ProjectError> {
+    let file_stem = "astro";
+
+    // If file_stem is not lib, create a fake lib file.
+    let crate_id = db.intern_crate(CrateLongId(file_stem.into()));
+    db.set_crate_root(crate_id, Some(Directory(path.parent().unwrap().to_path_buf())));
+
+    let module_id = ModuleId::CrateRoot(crate_id);
+    let file_id = db.module_main_file(module_id).unwrap();
+    db.as_files_group_mut()
+        .override_file_content(file_id, Some(Arc::new(format!("mod {file_stem};"))));
+
+    // Creat file from input string.
+    let item_id =
+        extract_matches!(db.module_items(module_id).ok().unwrap()[0], ModuleItemId::Submodule);
+    let submodule_id = ModuleId::Submodule(item_id);
+    let sub_file_id = db.module_main_file(submodule_id).unwrap();
+    println!(
+        "submodule_id: {:?} full path: {:?} fileid: {:?} name: {:?}",
+        submodule_id,
+        submodule_id.full_path(db.upcast()),
+        sub_file_id,
+        sub_file_id.file_name(db.upcast())
+    );
+    db.as_files_group_mut().override_file_content(sub_file_id, Some(Arc::new(input.clone())));
+
+    Ok(crate_id)
 }
