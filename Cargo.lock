@@ -472,6 +472,7 @@ dependencies = [
  "cairo-lang-debug",
  "cairo-lang-utils",
  "env_logger",
+ "lazy_static",
  "log",
  "path-clean",
  "rust-embed",

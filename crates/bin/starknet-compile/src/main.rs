@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use cairo_lang_compiler::CompilerConfig;
 use cairo_lang_starknet::allowed_libfuncs::ListSelector;
-use cairo_lang_starknet::contract_class::{starknet_compile, starknet_compile_with_input_string};
+use cairo_lang_starknet::contract_class::starknet_compile;
+use cairo_lang_starknet::wasm_cairo_interface::starknet_compile_with_input_string;
 use clap::Parser;
 
 /// Command line args parser.
