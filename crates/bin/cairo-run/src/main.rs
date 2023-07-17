@@ -8,6 +8,7 @@ use cairo_lang_compiler::diagnostics::DiagnosticsReporter;
 use cairo_lang_compiler::project::setup_project;
 use cairo_lang_diagnostics::ToOption;
 use cairo_lang_runner::short_string::as_cairo_short_string;
+use cairo_lang_runner::wasm_cairo_interface::run_with_input_program_string;
 use cairo_lang_runner::{SierraCasmRunner, StarknetState};
 use cairo_lang_sierra::extensions::gas::{
     BuiltinCostWithdrawGasLibfunc, RedepositGasLibfunc, WithdrawGasLibfunc,
@@ -31,10 +32,26 @@ struct Args {
     /// Whether to print the memory.
     #[arg(long, default_value_t = false)]
     print_full_memory: bool,
+    /// Input program string of Cairo code.
+    #[arg(long)]
+    input_program_string: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // if input_program_string is provided, use it instead of the file.
+    if let Some(input_program_string) = args.input_program_string {
+        let _result = run_with_input_program_string(
+            &input_program_string,
+            args.available_gas,
+            args.print_full_memory,
+            false,
+        );
+        // print errors of _result
+        print!("Result:{:?}", _result);
+        return Ok(());
+    }
 
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
 
