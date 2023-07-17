@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, Error};
 use cairo_lang_compiler::diagnostics::get_diagnostics_as_string;
 use cairo_lang_compiler::{wasm_cairo_interface::setup_project_with_input_string, db::RootDatabase, diagnostics::DiagnosticsReporter};
 use cairo_lang_diagnostics::ToOption;
@@ -56,15 +56,17 @@ pub fn run_with_input_program_string(
         if available_gas.is_some() { Some(Default::default()) } else { None },
         contracts_info,
     )
-    .with_context(|| "Failed setting up runner.")?;
+    //.with_context(|| "Failed setting up runner.")?;
+    .map_err(|err| Error::msg(err.to_string()))?;  
     let result = runner
         .run_function(
-            runner.find_function("::main")?,
+            runner.find_function("::main").map_err(|err| Error::msg(err.to_string()))?,
             &[],
             available_gas,
             StarknetState::default(),
         )
-        .with_context(|| "Failed to run the function.")?;
+        //.with_context(|| "Failed to run the function.")?;
+        .map_err(|err| Error::msg(err.to_string()))?;  
     generate_run_result_log(&result, print_full_memory, use_dbg_print_hint)
 }
 

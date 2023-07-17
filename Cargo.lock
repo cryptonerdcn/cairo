@@ -670,6 +670,7 @@ dependencies = [
  "salsa",
  "test-case",
  "thiserror",
+ "thiserror-no-std",
 ]
 
 [[package]]

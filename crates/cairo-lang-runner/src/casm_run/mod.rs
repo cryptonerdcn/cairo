@@ -1,7 +1,12 @@
 use std::any::Any;
 use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::ops::{Deref, Shl};
+
+#[cfg(feature = "std")]
+use std::collections::HashMap;
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
+use cairo_vm::without_std::collections::HashMap;
 
 use ark_ff::fields::{Fp256, MontBackend, MontConfig};
 use ark_ff::{BigInteger, Field, PrimeField};
