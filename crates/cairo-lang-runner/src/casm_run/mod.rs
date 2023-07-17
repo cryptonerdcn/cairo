@@ -37,6 +37,8 @@ use self::dict_manager::DictSquashExecScope;
 use crate::short_string::as_cairo_short_string;
 use crate::{Arg, RunResultValue, SierraCasmRunner};
 
+use cairo_lang_filesystem::log_db::LogDatabase;
+
 #[cfg(test)]
 mod test;
 
@@ -1795,18 +1797,24 @@ pub fn execute_core_hint(
                 let (base, offset) = extract_buffer(value);
                 get_ptr(vm, base, &offset)
             };
+            let mut debug_string = String::new(); // initialize debug_string
             let mut curr = as_relocatable(vm, start)?;
             let end = as_relocatable(vm, end)?;
             while curr != end {
                 let value = vm.get_integer(curr)?;
                 if let Some(shortstring) = as_cairo_short_string(&value) {
                     println!("[DEBUG]\t{shortstring: <31}\t(raw: {value: <31})");
+                    debug_string.push_str(&format!("[DEBUG]\t{shortstring: <31}\t(raw: {value: <31})", shortstring = shortstring, value = value));
                 } else {
                     println!("[DEBUG]\t{0: <31}\t(raw: {value: <31}) ", ' ');
+                    debug_string.push_str(&format!("[DEBUG]\t{0: <31}\t(raw: {value: <31}) ", ' ', value = value));
                 }
                 curr += 1;
             }
             println!();
+            // push_str to debug_string
+            debug_string.push_str(&format!("\n"));
+            LogDatabase::append_file_text( "log_file".to_string(), debug_string);
         }
         CoreHint::AllocConstantSize { size, dst } => {
             let object_size = get_val(vm, size)?.to_usize().expect("Object size too large.");
@@ -1913,6 +1921,8 @@ pub fn run_function<'a, 'b: 'a, Instructions: Iterator<Item = &'a Instruction> +
     let end = runner.initialize(&mut vm).map_err(CairoRunError::from)?;
 
     additional_initialization(RunFunctionContext { vm: &mut vm, data_len })?;
+
+    LogDatabase::create_file_text( "log_file".to_string(), "Wasm-Cairo Debug outputs: \n".to_string());// initialize log_file
 
     runner
         .run_until_pc(end, &mut RunResources::default(), &mut vm, &mut hint_processor)
