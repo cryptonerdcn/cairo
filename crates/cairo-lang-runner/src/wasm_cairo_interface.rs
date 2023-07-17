@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use cairo_lang_compiler::diagnostics::get_diagnostics_as_string;
 use cairo_lang_compiler::{wasm_cairo_interface::setup_project_with_input_string, db::RootDatabase, diagnostics::DiagnosticsReporter};
 use cairo_lang_diagnostics::ToOption;
 use cairo_lang_sierra::extensions::gas::{
@@ -26,7 +27,8 @@ pub fn run_with_input_program_string(
     let main_crate_ids = setup_project_with_input_string(db, Path::new("astro.cairo"), &input_program_string)?;
 
     if DiagnosticsReporter::stderr().check(db) {
-        anyhow::bail!("failed to compile: {}", input_program_string);
+        let err_string = get_diagnostics_as_string(db);
+        anyhow::bail!("failed to compile:\n {}", err_string);
     }
 
     let sierra_program = db
