@@ -13,6 +13,9 @@ path-clean.workspace = true
 salsa.workspace = true
 serde.workspace = true
 smol_str.workspace = true
+log.workspace = true
+rust-embed.workspace = true
+lazy_static.workspace = true
 
 [dev-dependencies]
 env_logger.workspace = true

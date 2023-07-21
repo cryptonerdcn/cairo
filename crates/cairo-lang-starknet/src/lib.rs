@@ -13,6 +13,7 @@ pub mod contract_class;
 mod felt252_serde;
 mod felt252_vec_compression;
 pub mod plugin;
+pub mod wasm_cairo_interface;
 
 #[cfg(test)]
 mod test_utils;

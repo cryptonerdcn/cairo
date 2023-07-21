@@ -31,10 +31,14 @@ use cairo_vm::vm::errors::cairo_run_errors::CairoRunError;
 pub use casm_run::StarknetState;
 use itertools::chain;
 use num_traits::ToPrimitive;
+#[cfg(feature = "std")]
 use thiserror::Error;
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
+use thiserror_no_std::Error;
 
 pub mod casm_run;
 pub mod short_string;
+pub mod wasm_cairo_interface;
 
 #[derive(Debug, Error)]
 pub enum RunnerError {
@@ -58,6 +62,8 @@ pub enum RunnerError {
     ApChangeError(#[from] ApChangeError),
     #[error(transparent)]
     CairoRunError(#[from] Box<CairoRunError>),
+    #[error(transparent)]
+    Other(anyhow::Error),
 }
 
 /// The full result of a run.

@@ -472,7 +472,10 @@ dependencies = [
  "cairo-lang-debug",
  "cairo-lang-utils",
  "env_logger",
+ "lazy_static",
+ "log",
  "path-clean",
+ "rust-embed",
  "salsa",
  "serde",
  "serde_json",
@@ -667,6 +670,7 @@ dependencies = [
  "salsa",
  "test-case",
  "thiserror",
+ "thiserror-no-std",
 ]
 
 [[package]]
@@ -2495,6 +2499,40 @@ dependencies = [
  "rustc_version",
  "syn 1.0.103",
  "unicode-ident",
+]
+
+[[package]]
+name = "rust-embed"
+version = "6.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a36224c3276f8c4ebc8c20f158eca7ca4359c8db89991c4925132aaaf6702661"
+dependencies = [
+ "rust-embed-impl",
+ "rust-embed-utils",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-impl"
+version = "6.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49b94b81e5b2c284684141a2fb9e2a31be90638caf040bf9afbc5a0416afe1ac"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rust-embed-utils",
+ "syn 2.0.18",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-utils"
+version = "7.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d38ff6bf570dc3bb7100fce9f7b60c33fa71d80e88da3f2580df4ff2bdded74"
+dependencies = [
+ "sha2",
+ "walkdir",
 ]
 
 [[package]]

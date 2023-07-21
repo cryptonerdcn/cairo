@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use cairo_lang_compiler::db::RootDatabase;
 use cairo_lang_compiler::project::setup_project;
 use cairo_lang_compiler::CompilerConfig;
+use cairo_lang_compiler::wasm_cairo_interface::setup_project_with_input_string;
 use cairo_lang_defs::ids::TopLevelLanguageElementId;
 use cairo_lang_diagnostics::ToOption;
 use cairo_lang_filesystem::ids::CrateId;
@@ -71,6 +72,24 @@ pub struct ContractEntryPoint {
     pub selector: BigUint,
     /// The idx of the user function declaration in the sierra program.
     pub function_idx: usize,
+}
+
+/// Compile the contract given by path.
+/// Errors if there is ambiguity.
+pub fn compile_path_with_input_string(
+    path: &Path,
+    contract_path: Option<&str>,
+    compiler_config: CompilerConfig<'_>,
+    input_string: &String,
+) -> Result<ContractClass> {
+    let mut db = RootDatabase::builder()
+        .detect_corelib()
+        .with_semantic_plugin(Arc::new(StarkNetPlugin::default()))
+        .build()?;
+
+    let main_crate_ids = setup_project_with_input_string(&mut db, Path::new(&path), input_string)?;
+
+    compile_contract_in_prepared_db(&mut db, contract_path, main_crate_ids, compiler_config)
 }
 
 /// Compile the contract given by path.
