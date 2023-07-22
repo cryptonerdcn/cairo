@@ -1,9 +1,13 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, Error};
+use anyhow::{Context, Error, Result};
 use cairo_lang_compiler::diagnostics::get_diagnostics_as_string;
-use cairo_lang_compiler::{wasm_cairo_interface::setup_project_with_input_string, db::RootDatabase, diagnostics::DiagnosticsReporter};
+use cairo_lang_compiler::{
+    db::RootDatabase, diagnostics::DiagnosticsReporter,
+    wasm_cairo_interface::setup_project_with_input_string,
+};
 use cairo_lang_diagnostics::ToOption;
+use cairo_lang_filesystem::log_db::LogDatabase;
 use cairo_lang_sierra::extensions::gas::{
     BuiltinCostWithdrawGasLibfunc, RedepositGasLibfunc, WithdrawGasLibfunc,
 };
@@ -11,10 +15,9 @@ use cairo_lang_sierra::extensions::NamedLibfunc;
 use cairo_lang_sierra_generator::db::SierraGenGroup;
 use cairo_lang_sierra_generator::replace_ids::{DebugReplacer, SierraIdReplacer};
 use cairo_lang_starknet::contract::get_contracts_info;
-use cairo_lang_filesystem::log_db::LogDatabase;
 
 use crate::short_string::as_cairo_short_string;
-use crate::{SierraCasmRunner, StarknetState, RunResult, RunResultValue};
+use crate::{RunResult, RunResultValue, SierraCasmRunner, StarknetState};
 
 pub fn run_with_input_program_string(
     input_program_string: &String,
@@ -24,7 +27,8 @@ pub fn run_with_input_program_string(
 ) -> Result<String> {
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
 
-    let main_crate_ids = setup_project_with_input_string(db, Path::new("astro.cairo"), &input_program_string)?;
+    let main_crate_ids =
+        setup_project_with_input_string(db, Path::new("astro.cairo"), &input_program_string)?;
 
     if DiagnosticsReporter::stderr().check(db) {
         let err_string = get_diagnostics_as_string(db);
@@ -57,7 +61,7 @@ pub fn run_with_input_program_string(
         contracts_info,
     )
     //.with_context(|| "Failed setting up runner.")?;
-    .map_err(|err| Error::msg(err.to_string()))?;  
+    .map_err(|err| Error::msg(err.to_string()))?;
     let result = runner
         .run_function(
             runner.find_function("::main").map_err(|err| Error::msg(err.to_string()))?,
@@ -66,7 +70,7 @@ pub fn run_with_input_program_string(
             StarknetState::default(),
         )
         //.with_context(|| "Failed to run the function.")?;
-        .map_err(|err| Error::msg(err.to_string()))?;  
+        .map_err(|err| Error::msg(err.to_string()))?;
     generate_run_result_log(&result, print_full_memory, use_dbg_print_hint)
 }
 

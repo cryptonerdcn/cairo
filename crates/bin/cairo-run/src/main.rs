@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Ok, Error};
+use anyhow::{Context, Error, Ok};
 use cairo_lang_compiler::db::RootDatabase;
 use cairo_lang_compiler::diagnostics::DiagnosticsReporter;
 use cairo_lang_compiler::project::setup_project;
@@ -87,7 +87,7 @@ fn main() -> anyhow::Result<()> {
         contracts_info,
     )
     //.with_context(|| "Failed setting up runner.")?;
-    .map_err(|err| Error::msg(err.to_string()))?;  
+    .map_err(|err| Error::msg(err.to_string()))?;
     let result = runner
         .run_function(
             runner.find_function("::main").map_err(|err| Error::msg(err.to_string()))?,
@@ -96,7 +96,7 @@ fn main() -> anyhow::Result<()> {
             StarknetState::default(),
         )
         //.with_context(|| "Failed to run the function.")?;
-        .map_err(|err| Error::msg(err.to_string()))?;  
+        .map_err(|err| Error::msg(err.to_string()))?;
     match result.value {
         cairo_lang_runner::RunResultValue::Success(values) => {
             println!("Run completed successfully, returning {values:?}")

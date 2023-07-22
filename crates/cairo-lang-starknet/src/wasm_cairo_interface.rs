@@ -1,8 +1,20 @@
-use std::path::{PathBuf, Path};
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use cairo_lang_compiler::CompilerConfig;
-use crate::{contract_class::compile_path_with_input_string, allowed_libfuncs::{ListSelector, validate_compatible_sierra_version}};
+use crate::{
+    allowed_libfuncs::{validate_compatible_sierra_version, ListSelector},
+    contract_class::{compile_contract_in_prepared_db, ContractClass},
+    plugin::StarkNetPlugin,
+};
+use cairo_lang_compiler::{
+    db::RootDatabase,
+    diagnostics::{get_diagnostics_as_string, DiagnosticsReporter},
+    wasm_cairo_interface::setup_project_with_input_string,
+    CompilerConfig,
+};
 
 /// Compile Starknet crate (or specific contract in the crate).
 pub fn starknet_compile_with_input_string(
@@ -48,4 +60,27 @@ pub fn starknet_wasm_compile_with_input_string(
     )?;
 
     Ok(res)
+}
+
+/// Compile the contract given by path.
+/// Errors if there is ambiguity.
+pub fn compile_path_with_input_string(
+    path: &Path,
+    contract_path: Option<&str>,
+    compiler_config: CompilerConfig<'_>,
+    input_string: &String,
+) -> Result<ContractClass> {
+    let mut db = RootDatabase::builder()
+        .detect_corelib()
+        .with_semantic_plugin(Arc::new(StarkNetPlugin::default()))
+        .build()?;
+
+    let main_crate_ids = setup_project_with_input_string(&mut db, Path::new(&path), input_string)?;
+
+    if DiagnosticsReporter::stderr().check(&db) {
+        let err_string = get_diagnostics_as_string(&mut db);
+        anyhow::bail!("failed to compile:\n {}", err_string);
+    }
+
+    compile_contract_in_prepared_db(&mut db, contract_path, main_crate_ids, compiler_config)
 }
