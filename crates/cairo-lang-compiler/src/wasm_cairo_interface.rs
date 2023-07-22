@@ -1,9 +1,18 @@
-use std::{path::Path, sync::Arc};
 use anyhow::Result;
-use cairo_lang_filesystem::{ids::{CrateId, CrateLongId, Directory}, db::FilesGroupEx};
+use cairo_lang_filesystem::{
+    db::FilesGroupEx,
+    ids::{CrateId, CrateLongId, Directory},
+};
 use cairo_lang_semantic::db::SemanticGroup;
+use std::{path::Path, sync::Arc};
 
-use crate::{CompilerConfig, db::RootDatabase, compile_prepared_db, SierraProgram, project::ProjectError, diagnostics::{DiagnosticsReporter, get_diagnostics_as_string}};
+use crate::{
+    compile_prepared_db,
+    db::RootDatabase,
+    diagnostics::{get_diagnostics_as_string, DiagnosticsReporter},
+    project::ProjectError,
+    CompilerConfig, SierraProgram,
+};
 use cairo_lang_defs::ids::{ModuleId, ModuleItemId};
 use cairo_lang_utils::extract_matches;
 
