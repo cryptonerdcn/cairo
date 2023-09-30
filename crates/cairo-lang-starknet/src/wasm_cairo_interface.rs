@@ -7,7 +7,7 @@ use std::{
 use crate::{
     allowed_libfuncs::{validate_compatible_sierra_version, ListSelector},
     contract_class::{compile_contract_in_prepared_db, ContractClass},
-    plugin::StarkNetPlugin,
+    plugin::StarkNetPlugin, inline_macros::selector::SelectorMacro,
 };
 use cairo_lang_compiler::{
     db::RootDatabase,
@@ -71,14 +71,15 @@ pub fn compile_path_with_input_string(
     input_string: &String,
 ) -> Result<ContractClass> {
     let mut db = RootDatabase::builder()
-        .detect_corelib()
-        .with_semantic_plugin(Arc::new(StarkNetPlugin::default()))
-        .build()?;
+    .detect_corelib()
+    .with_macro_plugin(Arc::new(StarkNetPlugin::default()))
+    .with_inline_macro_plugin(SelectorMacro::NAME, Arc::new(SelectorMacro))
+    .build()?;
 
     let main_crate_ids = setup_project_with_input_string(&mut db, Path::new(&path), input_string)?;
 
     if DiagnosticsReporter::stderr().check(&db) {
-        let err_string = get_diagnostics_as_string(&mut db);
+        let err_string = get_diagnostics_as_string(&mut db, &[]);
         anyhow::bail!("failed to compile:\n {}", err_string);
     }
 

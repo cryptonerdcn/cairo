@@ -17,7 +17,7 @@ use cairo_lang_sierra_generator::replace_ids::{DebugReplacer, SierraIdReplacer};
 use cairo_lang_starknet::contract::get_contracts_info;
 
 use crate::short_string::as_cairo_short_string;
-use crate::{RunResult, RunResultValue, SierraCasmRunner, StarknetState};
+use crate::{RunResultValue, SierraCasmRunner, StarknetState, RunResultStarknet};
 
 pub fn run_with_input_program_string(
     input_program_string: &String,
@@ -26,12 +26,12 @@ pub fn run_with_input_program_string(
     use_dbg_print_hint: bool,
 ) -> Result<String> {
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
-
+    // TODO: single file and run
     let main_crate_ids =
         setup_project_with_input_string(db, Path::new("astro.cairo"), &input_program_string)?;
 
     if DiagnosticsReporter::stderr().check(db) {
-        let err_string = get_diagnostics_as_string(db);
+        let err_string = get_diagnostics_as_string(db, &[]);
         anyhow::bail!("failed to compile:\n {}", err_string);
     }
 
@@ -40,17 +40,8 @@ pub fn run_with_input_program_string(
         .to_option()
         .with_context(|| "Compilation failed without any diagnostics.")?;
     let replacer = DebugReplacer { db };
-    if available_gas.is_none()
-        && sierra_program.type_declarations.iter().any(|decl| {
-            matches!(
-                decl.long_id.generic_id.0.as_str(),
-                WithdrawGasLibfunc::STR_ID
-                    | BuiltinCostWithdrawGasLibfunc::STR_ID
-                    | RedepositGasLibfunc::STR_ID
-            )
-        })
-    {
-        anyhow::bail!("Program requires gas counter, please provide `--available_gas` argument.");
+    if available_gas.is_none() && sierra_program.requires_gas_counter() {
+        anyhow::bail!("Program requires gas counter, please provide `--available-gas` argument.");
     }
 
     let contracts_info = get_contracts_info(db, main_crate_ids, &replacer)?;
@@ -63,7 +54,7 @@ pub fn run_with_input_program_string(
     //.with_context(|| "Failed setting up runner.")?;
     .map_err(|err| Error::msg(err.to_string()))?;
     let result = runner
-        .run_function(
+            .run_function_with_starknet_context(
             runner.find_function("::main").map_err(|err| Error::msg(err.to_string()))?,
             &[],
             available_gas,
@@ -75,7 +66,7 @@ pub fn run_with_input_program_string(
 }
 
 fn generate_run_result_log(
-    result: &RunResult,
+    result: &RunResultStarknet,
     print_full_memory: bool,
     use_dbg_print_hint: bool,
 ) -> Result<String> {

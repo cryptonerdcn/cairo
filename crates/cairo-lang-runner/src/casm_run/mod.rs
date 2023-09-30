@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::ops::{Deref, Shl};
 
 #[cfg(feature = "std")]
@@ -1900,10 +1900,10 @@ pub fn execute_core_hint(
                 let value = vm.get_integer(curr)?;
                 if let Some(shortstring) = as_cairo_short_string(&value) {
                     println!("[DEBUG]\t{shortstring: <31}\t(raw: {:#x}", value.to_bigint());
-                    debug_string.push_str(&format!("[DEBUG]\t{shortstring: <31}\t(raw: {:#x}", value.to_bigint());
+                    debug_string.push_str(&format!("[DEBUG]\t{shortstring: <31}\t(raw: {:#x}", value.to_bigint()));
                 } else {
                     println!("[DEBUG]\t{:<31}\t(raw: {:#x} ", ' ', value.to_bigint());
-                    debug_string.push_str(&format!("[DEBUG]\t{:<31}\t(raw: {:#x} ", ' ', value.to_bigint());
+                    debug_string.push_str(&format!("[DEBUG]\t{:<31}\t(raw: {:#x} ", ' ', value.to_bigint()));
                 }
                 curr += 1;
             }

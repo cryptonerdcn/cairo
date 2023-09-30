@@ -33,7 +33,8 @@ pub fn compile_cairo_project_with_input_string(
     let mut db = RootDatabase::builder().detect_corelib().build()?; //build a hashmap of corelib
     let main_crate_ids = setup_project_with_input_string(&mut db, path, input)?; // Set up need to build file
     if DiagnosticsReporter::stderr().check(&db) {
-        let err_string = get_diagnostics_as_string(&mut db);
+        // TODO: Check if this need extra crate ids.
+        let err_string = get_diagnostics_as_string(&mut db, &[]);
         anyhow::bail!("failed to compile:\n {}", err_string);
     }
     compile_prepared_db(&mut db, main_crate_ids, compiler_config)
@@ -59,8 +60,8 @@ fn setup_single_file_project_with_input_string(
     let file_stem = "astro";
 
     // If file_stem is not lib, create a fake lib file.
-    let crate_id = db.intern_crate(CrateLongId(file_stem.into()));
-    db.set_crate_root(crate_id, Some(Directory(path.parent().unwrap().to_path_buf())));
+    let crate_id = db.intern_crate(CrateLongId::Real(file_stem.into()));
+    db.set_crate_root(crate_id, Some(Directory::Real(path.parent().unwrap().to_path_buf())));
 
     let module_id = ModuleId::CrateRoot(crate_id);
     let file_id = db.module_main_file(module_id).unwrap();
