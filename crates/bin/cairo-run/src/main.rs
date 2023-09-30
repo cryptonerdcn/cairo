@@ -2,12 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Ok};
+use anyhow::{Context, Error, Ok};
 use cairo_lang_compiler::db::RootDatabase;
 use cairo_lang_compiler::diagnostics::DiagnosticsReporter;
 use cairo_lang_compiler::project::{check_compiler_path, setup_project};
 use cairo_lang_diagnostics::ToOption;
 use cairo_lang_runner::short_string::as_cairo_short_string;
+use cairo_lang_runner::wasm_cairo_interface::run_with_input_program_string;
 use cairo_lang_runner::{SierraCasmRunner, StarknetState};
 use cairo_lang_sierra_generator::db::SierraGenGroup;
 use cairo_lang_sierra_generator::replace_ids::{DebugReplacer, SierraIdReplacer};
@@ -30,6 +31,9 @@ struct Args {
     /// Whether to print the memory.
     #[arg(long, default_value_t = false)]
     print_full_memory: bool,
+    /// Input program string of Cairo code.
+    #[arg(long)]
+    input_program_string: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -37,6 +41,19 @@ fn main() -> anyhow::Result<()> {
 
     // Check if args.path is a file or a directory.
     check_compiler_path(args.single_file, &args.path)?;
+	// TODO: single file and run
+    // if input_program_string is provided, use it instead of the file.
+    if let Some(input_program_string) = args.input_program_string {
+        let _result = run_with_input_program_string(
+            &input_program_string,
+            args.available_gas,
+            args.print_full_memory,
+            false,
+        );
+        // print errors of _result
+        print!("Result:{:?}", _result);
+        return Ok(());
+    }
 
     let db = &mut RootDatabase::builder().detect_corelib().build()?;
 
@@ -62,15 +79,17 @@ fn main() -> anyhow::Result<()> {
         if args.available_gas.is_some() { Some(Default::default()) } else { None },
         contracts_info,
     )
-    .with_context(|| "Failed setting up runner.")?;
+    //.with_context(|| "Failed setting up runner.")?;
+    .map_err(|err| Error::msg(err.to_string()))?;
     let result = runner
         .run_function_with_starknet_context(
-            runner.find_function("::main")?,
+            runner.find_function("::main").map_err(|err| Error::msg(err.to_string()))?,
             &[],
             args.available_gas,
             StarknetState::default(),
         )
-        .with_context(|| "Failed to run the function.")?;
+        //.with_context(|| "Failed to run the function.")?;
+        .map_err(|err| Error::msg(err.to_string()))?;
     match result.value {
         cairo_lang_runner::RunResultValue::Success(values) => {
             println!("Run completed successfully, returning {values:?}")

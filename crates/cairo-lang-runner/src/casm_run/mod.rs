@@ -3,6 +3,11 @@ use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::ops::{Deref, Shl};
 
+#[cfg(feature = "std")]
+use std::collections::HashMap;
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
+use cairo_vm::without_std::collections::HashMap;
+
 use ark_ff::fields::{Fp256, MontBackend, MontConfig};
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_std::UniformRand;
@@ -39,6 +44,8 @@ use {ark_secp256k1 as secp256k1, ark_secp256r1 as secp256r1};
 use self::dict_manager::DictSquashExecScope;
 use crate::short_string::as_cairo_short_string;
 use crate::{build_hints_dict, Arg, RunResultValue, SierraCasmRunner};
+
+use cairo_lang_filesystem::log_db::LogDatabase;
 
 #[cfg(test)]
 mod test;
@@ -1887,16 +1894,23 @@ pub fn execute_core_hint(
         CoreHint::DebugPrint { start, end } => {
             let mut curr = extract_relocatable(vm, start)?;
             let end = extract_relocatable(vm, end)?;
+            let mut debug_string = String::new(); // initialize debug_string
+
             while curr != end {
                 let value = vm.get_integer(curr)?;
                 if let Some(shortstring) = as_cairo_short_string(&value) {
                     println!("[DEBUG]\t{shortstring: <31}\t(raw: {:#x}", value.to_bigint());
+                    debug_string.push_str(&format!("[DEBUG]\t{shortstring: <31}\t(raw: {:#x}", value.to_bigint());
                 } else {
                     println!("[DEBUG]\t{:<31}\t(raw: {:#x} ", ' ', value.to_bigint());
+                    debug_string.push_str(&format!("[DEBUG]\t{:<31}\t(raw: {:#x} ", ' ', value.to_bigint());
                 }
                 curr += 1;
             }
             println!();
+            // push_str to debug_string
+            debug_string.push_str(&format!("\n"));
+            LogDatabase::append_file_text( "log_file".to_string(), debug_string);
         }
         CoreHint::AllocConstantSize { size, dst } => {
             let object_size = get_val(vm, size)?.to_usize().expect("Object size too large.");
@@ -2029,7 +2043,8 @@ where
 
     additional_initialization(RunFunctionContext { vm: &mut vm, data_len })?;
 
-    runner.run_until_pc(end, &mut vm, hint_processor).map_err(CairoRunError::from)?;
+    LogDatabase::create_file_text( "log_file".to_string(), "Wasm-Cairo Debug outputs: \n".to_string());// initialize log_file
+	runner.run_until_pc(end, &mut vm, hint_processor).map_err(CairoRunError::from)?;
     runner.end_run(true, false, &mut vm, hint_processor).map_err(CairoRunError::from)?;
     runner.relocate(&mut vm, true).map_err(CairoRunError::from)?;
     Ok((runner.relocated_memory, vm.get_relocated_trace().unwrap().last().unwrap().ap))

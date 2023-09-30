@@ -19,3 +19,14 @@ cairo-lang-compiler = { path = "../../cairo-lang-compiler", version = "2.2.0" }
 cairo-lang-utils = { path = "../../cairo-lang-utils", version = "2.2.0", features = [
     "env_logger",
 ] }
+
+[features]
+alloc = [
+    "cairo-lang-runner/alloc",
+]
+default = [
+    "std",
+]
+std = [
+    "cairo-lang-runner/std",
+]
