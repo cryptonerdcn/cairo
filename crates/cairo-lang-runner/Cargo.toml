@@ -51,7 +51,6 @@ alloc = [
     "cairo-felt/alloc",
 ]
 default = [
-    "std",
 ]
 std = [
     "anyhow/std",

@@ -1,5 +1,8 @@
 //! Basic runner for running a Sierra program on the vm.
+#[cfg(feature = "std")]
 use std::collections::HashMap;
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
+use cairo_vm::without_std::collections::HashMap;
 
 use cairo_felt::Felt252;
 use cairo_lang_casm::hints::Hint;

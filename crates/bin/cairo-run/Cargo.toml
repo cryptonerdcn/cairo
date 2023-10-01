@@ -25,7 +25,6 @@ alloc = [
     "cairo-lang-runner/alloc",
 ]
 default = [
-    "std",
 ]
 std = [
     "cairo-lang-runner/std",
