@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Check if args.path is a file or a directory.
-    check_compiler_path(args.single_file, &args.path)?;
+    // check_compiler_path(args.single_file, &args.path)?;
 
     let sierra_program = match args.input_program_string {
         Some(input_program_string) => compile_cairo_project_with_input_string(

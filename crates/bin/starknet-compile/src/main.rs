@@ -41,7 +41,7 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Check if args.path is a file or a directory.
-    check_compiler_path(args.single_file, &args.path)?;
+    // check_compiler_path(args.single_file, &args.path)?;
 
     let list_selector =
         ListSelector::new(args.allowed_libfuncs_list_name, args.allowed_libfuncs_list_file)

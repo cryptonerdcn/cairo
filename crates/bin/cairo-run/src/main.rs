@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Check if args.path is a file or a directory.
-    check_compiler_path(args.single_file, &args.path)?;
+    // check_compiler_path(args.single_file, &args.path)?;
 	// TODO: single file and run
     // if input_program_string is provided, use it instead of the file.
     if let Some(input_program_string) = args.input_program_string {
