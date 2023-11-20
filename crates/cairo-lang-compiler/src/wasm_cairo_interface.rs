@@ -1,6 +1,6 @@
 use anyhow::Result;
 use cairo_lang_filesystem::{
-    db::FilesGroupEx,
+    db::{CrateConfiguration, FilesGroupEx},
     ids::{CrateId, CrateLongId, Directory},
 };
 use cairo_lang_semantic::db::SemanticGroup;
@@ -11,25 +11,27 @@ use crate::{
     db::RootDatabase,
     diagnostics::{get_diagnostics_as_string, DiagnosticsReporter},
     project::ProjectError,
-    CompilerConfig, SierraProgram,
+    CompilerConfig,
 };
 use cairo_lang_defs::ids::{ModuleId, ModuleItemId};
+use cairo_lang_sierra::program::Program;
 use cairo_lang_utils::extract_matches;
 
 /// Compiles a Cairo project with input String.
 /// The project must be a valid Cairo project:
+/// Either a standalone `.cairo` file (a single crate), or a directory with a `cairo_project.toml`
+/// file.
 /// # Arguments
 /// * `path` - The path to the project.
-/// * `input` - The input string of source code.
 /// * `compiler_config` - The compiler configuration.
 /// # Returns
-/// * `Ok(SierraProgram)` - The compiled program.
+/// * `Ok(Program)` - The compiled program.
 /// * `Err(anyhow::Error)` - Compilation failed.
 pub fn compile_cairo_project_with_input_string(
     path: &Path,
     input: &String,
     compiler_config: CompilerConfig<'_>,
-) -> Result<SierraProgram> {
+) -> Result<Program> {
     let mut db = RootDatabase::builder().detect_corelib().build()?; //build a hashmap of corelib
     let main_crate_ids = setup_project_with_input_string(&mut db, path, input)?; // Set up need to build file
     if DiagnosticsReporter::stderr().check(&db) {
@@ -61,7 +63,12 @@ fn setup_single_file_project_with_input_string(
 
     // If file_stem is not lib, create a fake lib file.
     let crate_id = db.intern_crate(CrateLongId::Real(file_stem.into()));
-    db.set_crate_root(crate_id, Some(Directory::Real(path.parent().unwrap().to_path_buf())));
+    db.set_crate_config(
+        crate_id,
+        Some(CrateConfiguration::default_for_root(Directory::Real(
+            path.parent().unwrap().to_path_buf(),
+        ))),
+    );
 
     let module_id = ModuleId::CrateRoot(crate_id);
     let file_id = db.module_main_file(module_id).unwrap();

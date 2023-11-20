@@ -702,15 +702,20 @@ dependencies = [
 name = "cairo-lang-runner"
 version = "2.3.1"
 dependencies = [
+ "anyhow",
  "ark-ff",
  "ark-secp256k1",
  "ark-secp256r1",
  "ark-std",
  "cairo-felt",
  "cairo-lang-casm",
+ "cairo-lang-compiler",
+ "cairo-lang-diagnostics",
+ "cairo-lang-filesystem",
  "cairo-lang-sierra",
  "cairo-lang-sierra-ap-change",
  "cairo-lang-sierra-gas",
+ "cairo-lang-sierra-generator",
  "cairo-lang-sierra-to-casm",
  "cairo-lang-sierra-type-size",
  "cairo-lang-starknet",
@@ -1039,6 +1044,7 @@ dependencies = [
  "cairo-lang-runner",
  "cairo-lang-sierra-generator",
  "cairo-lang-starknet",
+ "cairo-lang-utils",
  "clap",
 ]
 
@@ -2577,7 +2583,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rust-embed-utils",
- "syn 2.0.25",
+ "syn 2.0.32",
  "walkdir",
 ]
 
