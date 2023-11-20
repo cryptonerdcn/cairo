@@ -8,7 +8,7 @@ use cairo_lang_filesystem::db::{
     init_dev_corelib, init_files_group, AsFilesGroupMut, CrateConfiguration, FilesDatabase,
     FilesGroup, FilesGroupEx, CORELIB_CRATE_NAME,
 };
-use cairo_lang_filesystem::detect::detect_corelib;
+use cairo_lang_filesystem::detect::{detect_corelib, detect_dummy_corelib};
 use cairo_lang_filesystem::ids::CrateLongId;
 use cairo_lang_lowering::db::{LoweringDatabase, LoweringGroup};
 use cairo_lang_parser::db::ParserDatabase;
@@ -140,7 +140,7 @@ impl RootDatabaseBuilder {
 
         if self.detect_corelib {
             let path =
-                detect_corelib().ok_or_else(|| anyhow!("Failed to find development corelib."))?;
+                detect_dummy_corelib().ok_or_else(|| anyhow!("Failed to find development corelib."))?;
             init_dev_corelib(&mut db, path);
         }
 

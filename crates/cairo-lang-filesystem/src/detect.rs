@@ -35,3 +35,11 @@ pub fn detect_corelib() -> Option<PathBuf> {
 
     None
 }
+
+pub fn detect_dummy_corelib() -> Option<PathBuf> {
+    let dir = Path::new("");
+    let mut path = dir.to_path_buf();
+    path.push("corelib");
+    path.push("src");
+    return Some(path);
+}
