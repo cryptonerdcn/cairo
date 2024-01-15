@@ -7,6 +7,7 @@ use cairo_lang_compiler::project::check_compiler_path;
 use cairo_lang_compiler::CompilerConfig;
 use cairo_lang_starknet::allowed_libfuncs::ListSelector;
 use cairo_lang_starknet::contract_class::starknet_compile;
+use cairo_lang_starknet::wasm_cairo_interface::starknet_compile_with_input_string;
 use clap::Parser;
 
 /// Command line args parser.
@@ -36,13 +37,15 @@ struct Args {
     /// A file of the allowed libfuncs list to use.
     #[arg(long)]
     allowed_libfuncs_list_file: Option<String>,
+    #[arg(long)]
+    input_program_string: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Check if args.path is a file or a directory.
-    check_compiler_path(args.single_file, &args.path)?;
+    // check_compiler_path(args.single_file, &args.path)?;
 
     let list_selector =
         ListSelector::new(args.allowed_libfuncs_list_name, args.allowed_libfuncs_list_file)
@@ -51,16 +54,29 @@ fn main() -> anyhow::Result<()> {
     if args.allow_warnings {
         diagnostics_reporter = diagnostics_reporter.allow_warnings();
     }
-    let res = starknet_compile(
-        args.path,
-        args.contract_path,
-        Some(CompilerConfig {
-            replace_ids: args.replace_ids,
-            diagnostics_reporter,
-            ..CompilerConfig::default()
-        }),
-        Some(list_selector),
-    )?;
+    let res = match args.input_program_string {
+        Some(_) => starknet_compile_with_input_string(
+            args.path,
+            args.contract_path,
+            Some(CompilerConfig {
+                replace_ids: args.replace_ids,
+                diagnostics_reporter,
+                ..CompilerConfig::default()
+            }),
+            Some(list_selector),
+            &args.input_program_string.unwrap(),
+        )?,
+        None => starknet_compile(
+            args.path,
+            args.contract_path,
+            Some(CompilerConfig {
+                replace_ids: args.replace_ids,
+                diagnostics_reporter,
+                ..CompilerConfig::default()
+            }),
+            Some(list_selector),
+        )?,
+    };
     match args.output {
         Some(path) => fs::write(path, res).with_context(|| "Failed to write output.")?,
         None => println!("{res}"),

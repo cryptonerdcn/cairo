@@ -7,11 +7,13 @@ license-file.workspace = true
 description = "Basic cairo runner."
 
 [dependencies]
+anyhow.workspace = true
 ark-ff.workspace = true
 ark-secp256k1.workspace = true
 ark-secp256r1.workspace = true
 ark-std.workspace = true
-cairo-felt.workspace = true
+# cairo-felt.workspace = true
+cairo-felt ={ version = "0.8.2", default-features = false }
 cairo-lang-casm = { path = "../cairo-lang-casm", version = "2.4.1" }
 cairo-lang-sierra = { path = "../cairo-lang-sierra", version = "2.4.1" }
 cairo-lang-sierra-ap-change = { path = "../cairo-lang-sierra-ap-change", version = "2.4.1" }
@@ -19,7 +21,8 @@ cairo-lang-sierra-to-casm = { path = "../cairo-lang-sierra-to-casm", version = "
 cairo-lang-sierra-type-size = { path = "../cairo-lang-sierra-type-size", version = "2.4.1" }
 cairo-lang-starknet = { path = "../cairo-lang-starknet", version = "2.4.1" }
 cairo-lang-utils = { path = "../cairo-lang-utils", version = "2.4.1" }
-cairo-vm.workspace = true
+# cairo-vm.workspace = true
+cairo-vm = { version = "0.9.1", default-features = false  }
 itertools.workspace = true
 keccak.workspace = true
 num-bigint.workspace = true
@@ -27,6 +30,11 @@ num-integer.workspace = true
 num-traits.workspace = true
 thiserror.workspace = true
 starknet-crypto.workspace = true
+# add support for wasm-cairo
+cairo-lang-filesystem = { path = "../cairo-lang-filesystem", version = "2.4.1" }
+cairo-lang-compiler = { path = "../cairo-lang-compiler", version = "2.4.1" }
+cairo-lang-sierra-generator = { path = "../cairo-lang-sierra-generator", version = "2.4.1" }
+cairo-lang-diagnostics = { path = "../cairo-lang-diagnostics", version = "2.4.1" }
 
 [dev-dependencies]
 indoc.workspace = true
@@ -34,3 +42,17 @@ test-case.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["ark-secp256k1", "ark-secp256r1"]
+[dependencies.thiserror-no-std]
+version = "2.0.2"
+
+[features]
+alloc = [
+    "cairo-felt/alloc",
+]
+default = [
+]
+std = [
+    "anyhow/std",
+    "cairo-vm/default",
+    "cairo-felt/default",
+]
