@@ -15,6 +15,14 @@ use crate::ids::{
 };
 use crate::span::{FileSummary, TextOffset, TextSpan, TextWidth};
 
+use rust_embed::RustEmbed;
+use std::io::Result;
+
+#[derive(RustEmbed)]
+#[folder = "corelib/src/"]
+struct Asset;
+
+
 #[cfg(test)]
 #[path = "db_test.rs"]
 mod test;
