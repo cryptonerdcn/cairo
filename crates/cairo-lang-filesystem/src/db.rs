@@ -255,9 +255,23 @@ fn crate_config(db: &dyn FilesGroup, crt: CrateId) -> Option<CrateConfiguration>
     }
 }
 
+// read file and return a Result
+fn read_file_on_disk_or_wasm(path: PathBuf) -> Result<String> {
+    // println!("Reading file {:?}", path);
+    let full_path_str = path.to_str().unwrap();
+    if let Some(start) = full_path_str.find("corelib/src/") {
+        // Use slicing to get the part of the string after the target string
+        let remaining = &full_path_str[start + "corelib/src/".len()..];
+        let file = Asset::get(remaining).unwrap();
+        return Ok(std::str::from_utf8(file.data.as_ref()).unwrap().to_string());
+    }
+    return fs::read_to_string(path);
+}
+
 fn priv_raw_file_content(db: &dyn FilesGroup, file: FileId) -> Option<Arc<str>> {
     match file.lookup_intern(db) {
-        FileLongId::OnDisk(path) => match fs::read_to_string(path) {
+        // FileLongId::OnDisk(path) => match fs::read_to_string(path) {
+        FileLongId::OnDisk(path) => match read_file_on_disk_or_wasm(path) { // Read from rust embedded if wasm
             Ok(content) => Some(content.into()),
             Err(_) => None,
         },
