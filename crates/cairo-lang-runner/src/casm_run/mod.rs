@@ -1,6 +1,13 @@
 use std::any::Any;
 use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
+#[cfg(not(feature = "alloc"))]
+use std::collections::HashMap;
+#[cfg(feature = "alloc")]
+use cairo_vm::without_std::collections::HashMap;
+
+use cairo_lang_filesystem::log_db::LogDatabase;
+
 use std::ops::{Shl, Sub};
 use std::vec::IntoIter;
 
@@ -2023,7 +2030,12 @@ pub fn execute_core_hint(
             )?;
         }
         CoreHint::DebugPrint { start, end } => {
-            print!("{}", format_for_debug(read_felts(vm, start, end)?.into_iter()));
+            // print!("{}", format_for_debug(read_felts(vm, start, end)?.into_iter()));
+            let mut debug_string = format_for_debug(read_felts(vm, start, end)?.into_iter()); // initialize debug_string
+            print!("{}", debug_string);
+			// write to log file
+            debug_string.push_str(&format!("\n"));
+            LogDatabase::append_file_text( "log_file".to_string(), debug_string);
         }
         CoreHint::AllocConstantSize { size, dst } => {
             let object_size = get_val(vm, size)?.to_usize().expect("Object size too large.");
@@ -2176,6 +2188,7 @@ pub fn run_function_with_runner(
     let end = runner.initialize(true).map_err(CairoRunError::from)?;
 
     additional_initialization(RunFunctionContext { vm: &mut runner.vm, data_len })?;
+    LogDatabase::create_file_text( "log_file".to_string(), "Wasm-Cairo Debug outputs: \n".to_string());// initialize log_file for WASM-Cairo debug outputs
 
     runner.run_until_pc(end, hint_processor).map_err(CairoRunError::from)?;
     runner.end_run(true, false, hint_processor).map_err(CairoRunError::from)?;

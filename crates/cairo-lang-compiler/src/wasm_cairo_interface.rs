@@ -63,21 +63,24 @@ pub fn setup_single_file_project_with_input_string(
     path: &Path,
     input: &String,
 ) -> Result<CrateId, ProjectError> {
+    // Dont check file extension for wasm-cairo interface.
     /*match path.extension().and_then(OsStr::to_str) {
         Some("cairo") => (),
         _ => {
             return Err(ProjectError::BadFileExtension);
         }
-    }*/
-    if !path.exists() {
-        return Err(ProjectError::NoSuchFile { path: path.to_string_lossy().to_string() });
     }
+    */
+    /* if !path.exists() {
+        return Err(ProjectError::NoSuchFile { path: path.to_string_lossy().to_string() });
+    } 
+    */
     let bad_path_err = || ProjectError::BadPath { path: path.to_string_lossy().to_string() };
-    let canonical = path.canonicalize().map_err(|_| bad_path_err())?;
-    let file_dir = canonical.parent().ok_or_else(bad_path_err)?;
     let file_stem = "astro";
     // let file_stem = path.file_stem().and_then(OsStr::to_str).ok_or_else(bad_path_err)?;
     if file_stem == "lib" {
+        let canonical = path.canonicalize().map_err(|_| bad_path_err())?;
+        let file_dir = canonical.parent().ok_or_else(bad_path_err)?;
         let crate_name = file_dir.to_str().ok_or_else(bad_path_err)?;
         let crate_id = CrateLongId::Real(crate_name.into()).intern(db);
         db.set_crate_config(
@@ -90,7 +93,7 @@ pub fn setup_single_file_project_with_input_string(
         let crate_id = CrateLongId::Real(file_stem.into()).intern(db);
         db.set_crate_config(
             crate_id,
-            Some(CrateConfiguration::default_for_root(Directory::Real(file_dir.to_path_buf()))),
+            Some(CrateConfiguration::default_for_root(Directory::Real(path.parent().unwrap().to_path_buf()))),
         );
 
         let module_id = ModuleId::CrateRoot(crate_id);
@@ -98,7 +101,7 @@ pub fn setup_single_file_project_with_input_string(
         db.as_files_group_mut()
             .override_file_content(file_id, 
                 //Some(format!("mod {file_stem};").into())
-        Some(Arc::from(input.clone()))
+        Some(Arc::from(input.clone())) // For wasm-cairo interface, input is a string of Cairo code
         );
         Ok(crate_id)
     }
