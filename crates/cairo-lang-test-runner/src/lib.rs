@@ -1,8 +1,9 @@
+use std::clone;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::vec::IntoIter;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Error, Context, Result};
 use cairo_lang_compiler::db::RootDatabase;
 use cairo_lang_compiler::project::setup_project;
 use cairo_lang_filesystem::cfg::{Cfg, CfgSet};
@@ -36,7 +37,9 @@ use itertools::Itertools;
 use num_traits::ToPrimitive;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use starknet_types_core::felt::Felt as Felt252;
+use cairo_lang_filesystem::log_db::LogDatabase;
 
+pub mod wasm_cairo_interface;
 #[cfg(test)]
 mod test;
 
@@ -99,6 +102,8 @@ impl CompiledTestRunner {
 
     /// Execute preconfigured test execution.
     pub fn run(self, db: Option<&RootDatabase>) -> Result<Option<TestsSummary>> {
+        LogDatabase::create_file_text( "test_log_file".to_string(), "Wasm-Cairo Test outputs: \n".to_string());// initialize log_file for WASM-Cairo test outputs
+        let mut test_result_string = String::new();
         let (compiled, filtered_out) = filter_test_cases(
             self.compiled,
             self.config.include_ignored,
@@ -136,17 +141,30 @@ impl CompiledTestRunner {
                 failed.len(),
                 ignored.len()
             );
+            test_result_string.push_str(&format!(
+                "test result: {}. {} passed; {} failed; {} ignored; {filtered_out} filtered out;\n",
+                "ok".bright_green(),
+                passed.len(),
+                failed.len(),
+                ignored.len()
+            ));
+            LogDatabase::append_file_text( "test_log_file".to_string(), test_result_string);// append test results to log_file
             Ok(None)
         } else {
             println!("failures:");
+            test_result_string.push_str("failures:\n");
             for (failure, run_result) in failed.iter().zip_eq(failed_run_results) {
                 print!("   {failure} - ");
+                test_result_string.push_str(&format!("   {failure} - "));
                 match run_result {
                     RunResultValue::Success(_) => {
                         println!("expected panic but finished successfully.");
+                        test_result_string.push_str("expected panic but finished successfully.\n");
                     }
                     RunResultValue::Panic(values) => {
+                        let cloned_values = values.clone(); // Clone values before passing it to format_for_panic
                         println!("{}", format_for_panic(values.into_iter()));
+                        test_result_string.push_str(&format!("{}", format_for_panic(cloned_values.into_iter())));
                     }
                 }
             }
@@ -158,6 +176,13 @@ impl CompiledTestRunner {
                 failed.len(),
                 ignored.len()
             );
+            test_result_string.push_str(&format!(
+                "test result: {}. {} passed; {} failed; {} ignored\n",
+                "FAILED".bright_red(),
+                passed.len(),
+                failed.len(),
+                ignored.len()
+            ));
         }
     }
 }
@@ -361,7 +386,8 @@ pub fn run_tests(
             }
         },
     )
-    .with_context(|| "Failed setting up runner.")?;
+    //.with_context(|| "Failed setting up runner.")?;
+    .map_err(|err| Error::msg(err.to_string()))?;
     let suffix = if named_tests.len() != 1 { "s" } else { "" };
     println!("running {} test{}", named_tests.len(), suffix);
     let wrapped_summary = Mutex::new(Ok(TestsSummary {
@@ -419,10 +445,12 @@ fn run_single_test(
     if test.ignored {
         return Ok((name, None));
     }
-    let func = runner.find_function(name.as_str())?;
+    // let func = runner.find_function(name.as_str())?;
+    let func = runner.find_function(name.as_str()).map_err(|err| Error::msg(err.to_string()))?;
     let result = runner
         .run_function_with_starknet_context(func, &[], test.available_gas, Default::default())
-        .with_context(|| format!("Failed to run the function `{}`.", name.as_str()))?;
+        //.with_context(|| format!("Failed to run the function `{}`.", name.as_str()))?;
+        .map_err(|err| Error::msg(err.to_string()))?;
     Ok((
         name,
         Some(TestResult {
@@ -465,6 +493,7 @@ fn update_summary(
     profiling_params: &ProfilingInfoProcessorParams,
     print_resource_usage: bool,
 ) {
+    let mut test_result_string = String::new();
     let mut wrapped_summary = wrapped_summary.lock().unwrap();
     if wrapped_summary.is_err() {
         return;
@@ -498,8 +527,10 @@ fn update_summary(
         };
     if let Some(gas_usage) = gas_usage {
         println!("test {name} ... {status_str} (gas usage est.: {gas_usage})");
+        test_result_string.push_str(&format!("test {name} ... {status_str} (gas usage est.: {gas_usage})\n"));  
     } else {
         println!("test {name} ... {status_str}");
+        test_result_string.push_str(&format!("test {name} ... {status_str}\n"));
     }
     if let Some(used_resources) = used_resources {
         let filtered = used_resources.basic_resources.filter_unused_builtins();
@@ -518,12 +549,24 @@ fn update_summary(
         // ```
         println!("    steps: {}", filtered.n_steps);
         println!("    memory holes: {}", filtered.n_memory_holes);
+        test_result_string.push_str(&format!("    steps: {}\n", filtered.n_steps));
+        test_result_string.push_str(&format!("    memory holes: {}\n", filtered.n_memory_holes));
+        let cloned_filtered = filtered.clone();
+        let cloned_used_resources = used_resources.clone();
 
         print_resource_map(
             filtered.builtin_instance_counter.into_iter().map(|(k, v)| (k.to_string(), v)),
             "builtins",
         );
         print_resource_map(used_resources.syscalls.into_iter(), "syscalls");
+        test_result_string.push_str(&format!(
+            "    builtins: ({})\n",
+            cloned_filtered.builtin_instance_counter.into_iter().map(|(k, v)| format!(r#""{k}": {v}"#)).join(", ")
+        ));
+        test_result_string.push_str(&format!(
+            "    syscalls: ({})\n",
+            cloned_used_resources.syscalls.into_iter().map(|(k, v)| format!(r#""{k}": {v}"#)).join(", ")
+        ));
     }
     if let Some(profiling_info) = profiling_info {
         let Some(PorfilingAuxData { db, statements_functions }) = profiler_data else {
@@ -537,7 +580,9 @@ fn update_summary(
         let processed_profiling_info =
             profiling_processor.process_ex(&profiling_info, profiling_params);
         println!("Profiling info:\n{processed_profiling_info}");
+        test_result_string.push_str(&format!("Profiling info:\n{processed_profiling_info}\n"));
     }
+    LogDatabase::append_file_text( "test_log_file".to_string(), test_result_string);// append test results to log_file
     res_type.push(name);
 }
 

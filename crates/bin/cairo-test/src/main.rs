@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Ok;
 use cairo_lang_compiler::project::check_compiler_path;
-use cairo_lang_test_runner::{RunProfilerConfig, TestRunConfig, TestRunner};
+use cairo_lang_test_runner::{wasm_cairo_interface::run_tests_with_input_string, RunProfilerConfig, TestRunConfig, TestRunner};
 use clap::{Parser, ValueEnum};
 use serde::Serialize;
 
@@ -62,13 +62,16 @@ struct Args {
     /// Whether to print resource usage after each test.
     #[arg(long, default_value_t = false)]
     print_resource_usage: bool,
+    /// Input program string of Cairo code.
+    #[arg(long)]
+    input_program_string: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Check if args.path is a file or a directory.
-    check_compiler_path(args.single_file, &args.path)?;
+    // check_compiler_path(args.single_file, &args.path)?; // Commented out for WASM-Cairo
 
     let config = TestRunConfig {
         filter: args.filter,
@@ -78,6 +81,12 @@ fn main() -> anyhow::Result<()> {
         gas_enabled: !args.gas_disabled,
         print_resource_usage: args.print_resource_usage,
     };
+
+    // if input_program_string is provided, use it instead of the file.
+    if let Some(input_program_string) = args.input_program_string {
+        let _ = run_tests_with_input_string(&input_program_string, args.allow_warnings, config.filter, config.include_ignored, config.ignored, args.starknet, String::new(), args.gas_disabled, config.print_resource_usage);
+        return Ok(());
+    }
 
     let runner = TestRunner::new(&args.path, args.starknet, args.allow_warnings, config)?;
     runner.run()?;
