@@ -15,3 +15,10 @@ cairo-lang-diagnostics = { path = "../../cairo-lang-diagnostics", version = "~2.
 cairo-lang-runner = { path = "../../cairo-lang-runner", version = "~2.7.1" }
 cairo-lang-sierra-generator = { path = "../../cairo-lang-sierra-generator", version = "~2.7.1" }
 cairo-lang-starknet = { path = "../../cairo-lang-starknet", version = "~2.7.1" }
+
+[features]
+alloc = [
+    "cairo-lang-runner/alloc",
+]
+default = [
+]

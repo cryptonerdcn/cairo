@@ -1,5 +1,11 @@
 //! Basic runner for running a Sierra program on the vm.
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+#[cfg(not(feature = "alloc"))]
+use std::collections::HashMap;
+
+#[cfg(feature = "alloc")]
+use cairo_vm::without_std::collections::HashMap;
+
 use std::ops::{Add, Sub};
 
 use cairo_lang_casm::hints::Hint;
@@ -45,13 +51,17 @@ use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use profiling::{user_function_idx_by_sierra_statement_idx, ProfilingInfo};
 use starknet_types_core::felt::Felt as Felt252;
+#[cfg(not(feature = "alloc"))]
 use thiserror::Error;
+#[cfg(feature = "alloc")]
+use thiserror_no_std::Error;
 
 use crate::casm_run::{RunFunctionContext, RunFunctionResult};
 
 pub mod casm_run;
 pub mod profiling;
 pub mod short_string;
+pub mod wasm_cairo_interface;
 
 const MAX_STACK_TRACE_DEPTH_DEFAULT: usize = 100;
 
@@ -79,6 +89,8 @@ pub enum RunnerError {
     ApChangeError(#[from] ApChangeError),
     #[error(transparent)]
     CairoRunError(#[from] Box<CairoRunError>),
+    #[error(transparent)]
+    Other(anyhow::Error),
 }
 
 /// The full result of a run with Starknet state.
