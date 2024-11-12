@@ -2,8 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use cairo_lang_compiler::project::check_compiler_path;
-use cairo_lang_compiler::{compile_cairo_project_at_path, CompilerConfig};
+use cairo_lang_compiler::{compile_cairo_project_at_path, CompilerConfig, wasm_cairo_interface::compile_cairo_project_with_input_string};
 use cairo_lang_utils::logging::init_logging;
 use clap::Parser;
 
@@ -44,6 +43,10 @@ struct Args {
     /// Overrides inlining behavior.
     #[arg(short, long, default_value = "default")]
     inlining_strategy: InliningStrategy,
+    /// Input program string of Cairo code.
+    #[arg(long)]
+    input_program_string: Option<String>,
+
 }
 
 fn main() -> anyhow::Result<()> {
@@ -53,16 +56,29 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Check if args.path is a file or a directory.
-    check_compiler_path(args.single_file, &args.path)?;
+    // check_compiler_path(args.single_file, &args.path)?;
 
-    let sierra_program = compile_cairo_project_at_path(
-        &args.path,
-        CompilerConfig {
-            replace_ids: args.replace_ids,
-            inlining_strategy: args.inlining_strategy.into(),
-            ..CompilerConfig::default()
-        },
-    )?;
+    // check_compiler_path(args.single_file, &args.path)?;
+
+    let sierra_program = match args.input_program_string {
+        Some(input_program_string) => compile_cairo_project_with_input_string(
+            &args.path,
+            &input_program_string,
+            CompilerConfig {
+                replace_ids: args.replace_ids,
+                inlining_strategy: args.inlining_strategy.into(),
+                ..CompilerConfig::default()
+            },
+        )?,
+        None => compile_cairo_project_at_path(
+            &args.path,
+            CompilerConfig {
+                replace_ids: args.replace_ids,
+                inlining_strategy: args.inlining_strategy.into(),
+                ..CompilerConfig::default()
+            },
+        )?,
+    };
 
     match args.output {
         Some(path) => {
