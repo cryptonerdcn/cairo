@@ -14,6 +14,7 @@ pub mod compile;
 pub mod contract;
 pub mod inline_macros;
 pub mod plugin;
+pub mod wasm_cairo_interface;
 
 /// Get the suite of plugins for compilation with StarkNet.
 pub fn starknet_plugin_suite() -> PluginSuite {

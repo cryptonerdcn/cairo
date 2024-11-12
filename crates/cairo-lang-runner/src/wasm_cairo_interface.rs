@@ -15,8 +15,6 @@ use cairo_lang_sierra_generator::replace_ids::{DebugReplacer, SierraIdReplacer};
 use cairo_lang_starknet::contract::get_contracts_info;
 
 use crate::casm_run::format_next_item;
-use crate::profiling::ProfilingInfoProcessor;
-use crate::short_string::as_cairo_short_string;
 use crate::{RunResultValue, ProfilingInfoCollectionConfig, SierraCasmRunner, StarknetState, RunResultStarknet};
 
 pub fn run_with_input_program_string(

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use cairo_lang_compiler::project::check_compiler_path;
+// use cairo_lang_compiler::project::check_compiler_path;
 use cairo_lang_compiler::{compile_cairo_project_at_path, CompilerConfig, wasm_cairo_interface::compile_cairo_project_with_input_string};
 use cairo_lang_utils::logging::init_logging;
 use clap::Parser;

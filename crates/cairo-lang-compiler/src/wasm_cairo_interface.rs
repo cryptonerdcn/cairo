@@ -14,9 +14,8 @@ use crate::{
     project::ProjectError,
     CompilerConfig,
 };
-use cairo_lang_defs::ids::{ModuleId, ModuleItemId};
+use cairo_lang_defs::ids::ModuleId;
 use cairo_lang_sierra::program::Program;
-use cairo_lang_utils::extract_matches;
 
 /// Compiles a Cairo project with input String.
 /// The project must be a valid Cairo project:
