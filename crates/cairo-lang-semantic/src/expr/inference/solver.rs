@@ -86,7 +86,7 @@ pub fn canonic_trait_solutions(
 /// Cycle handling for [canonic_trait_solutions].
 pub fn canonic_trait_solutions_cycle(
     _db: &dyn SemanticGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     _canonical_trait: &CanonicalTrait,
     _lookup_context: &ImplLookupContext,
 ) -> Result<SolutionSet<CanonicalImpl>, InferenceError> {

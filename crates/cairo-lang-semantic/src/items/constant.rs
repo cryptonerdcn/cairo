@@ -257,7 +257,7 @@ pub fn priv_constant_semantic_data(
 /// Cycle handling for [SemanticGroup::priv_constant_semantic_data].
 pub fn priv_constant_semantic_data_cycle(
     db: &dyn SemanticGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     const_id: &ConstantId,
     _in_cycle: &bool,
 ) -> Maybe<ConstantData> {
@@ -642,7 +642,7 @@ pub fn constant_semantic_data(db: &dyn SemanticGroup, const_id: ConstantId) -> M
 /// Cycle handling for [SemanticGroup::constant_semantic_data].
 pub fn constant_semantic_data_cycle(
     db: &dyn SemanticGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     const_id: &ConstantId,
 ) -> Maybe<Constant> {
     // Forwarding cycle handling to `priv_constant_semantic_data` handler.
@@ -660,7 +660,7 @@ pub fn constant_resolver_data(
 /// Cycle handling for [crate::db::SemanticGroup::constant_resolver_data].
 pub fn constant_resolver_data_cycle(
     db: &dyn SemanticGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     const_id: &ConstantId,
 ) -> Maybe<Arc<ResolverData>> {
     Ok(db.priv_constant_semantic_data(*const_id, true)?.resolver_data)
@@ -674,7 +674,7 @@ pub fn constant_const_value(db: &dyn SemanticGroup, const_id: ConstantId) -> May
 /// Cycle handling for [crate::db::SemanticGroup::constant_const_value].
 pub fn constant_const_value_cycle(
     db: &dyn SemanticGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     const_id: &ConstantId,
 ) -> Maybe<ConstValue> {
     // Forwarding cycle handling to `priv_constant_semantic_data` handler.
@@ -689,7 +689,7 @@ pub fn constant_const_type(db: &dyn SemanticGroup, const_id: ConstantId) -> Mayb
 /// Cycle handling for [crate::db::SemanticGroup::constant_const_type].
 pub fn constant_const_type_cycle(
     db: &dyn SemanticGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     const_id: &ConstantId,
 ) -> Maybe<TypeId> {
     // Forwarding cycle handling to `priv_constant_semantic_data` handler.

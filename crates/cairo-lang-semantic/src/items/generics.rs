@@ -357,7 +357,7 @@ pub fn priv_generic_param_data(
 /// Cycle handling for [crate::db::SemanticGroup::priv_generic_param_data].
 pub fn priv_generic_param_data_cycle(
     db: &dyn SemanticGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     generic_param_id: &GenericParamId,
     _in_cycle: &bool,
 ) -> Maybe<GenericParamData> {

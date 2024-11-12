@@ -56,7 +56,7 @@ pub fn final_contains_call_cycle(
 /// Cycle handling for [LoweringGroup::final_contains_call_cycle].
 pub fn final_contains_call_cycle_handle_cycle(
     _db: &dyn LoweringGroup,
-    _cycle: &salsa::Cycle,
+    _cycle: &[String],
     _function_id: &ConcreteFunctionWithBodyId,
 ) -> Maybe<bool> {
     Ok(true)
