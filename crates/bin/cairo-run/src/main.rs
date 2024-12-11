@@ -11,7 +11,7 @@ use cairo_lang_diagnostics::ToOption;
 use cairo_lang_runner::casm_run::format_next_item;
 use cairo_lang_runner::profiling::ProfilingInfoProcessor;
 use cairo_lang_runner::{ProfilingInfoCollectionConfig, SierraCasmRunner, StarknetState};
-use cairo_lang_runner::wasm_cairo_interface::run_with_input_program_string;
+use cairo_lang_runner::wasm_cairo_interface::{run_with_input_program_string, run_with_sierra_json_string};
 use cairo_lang_sierra_generator::db::SierraGenGroup;
 use cairo_lang_sierra_generator::program_generator::SierraProgramWithDebug;
 use cairo_lang_sierra_generator::replace_ids::{DebugReplacer, SierraIdReplacer};
@@ -40,6 +40,9 @@ struct Args {
     /// Whether to run the profiler.
     #[arg(long, default_value_t = false)]
     run_profiler: bool,
+    /// Input program is compiled sierra program(json format)
+    #[arg(short, long)]
+    compiled_sierra: bool,
     /// Input program string of Cairo code.
     #[arg(long)]
     input_program_string: Option<String>,
@@ -50,6 +53,19 @@ fn main() -> anyhow::Result<()> {
 
     // Check if args.path is a file or a directory.
     // check_compiler_path(args.single_file, &args.path)?;
+
+    if args.compiled_sierra && args.input_program_string.is_some() {
+        let _result = run_with_sierra_json_string(
+            &args.input_program_string.unwrap(),
+            args.available_gas,
+            args.print_full_memory,
+            args.run_profiler,
+            false,
+        );
+        // print errors of _result
+        print!("Result:{:?}", _result);
+        return Ok(());
+    }
 
     // if input_program_string is provided, use it instead of the file.
     if let Some(input_program_string) = args.input_program_string {

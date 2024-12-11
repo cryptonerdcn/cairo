@@ -770,6 +770,8 @@ dependencies = [
  "num-integer",
  "num-traits 0.2.19",
  "rand",
+ "serde",
+ "serde_json",
  "sha2",
  "smol_str",
  "starknet-types-core",

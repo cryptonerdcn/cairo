@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use serde::Serializer;
 
 use anyhow::{Context, Error, Result};
 use cairo_lang_compiler::diagnostics::get_diagnostics_as_string;
@@ -13,6 +14,7 @@ use cairo_lang_sierra_generator::db::SierraGenGroup;
 use cairo_lang_sierra_generator::program_generator::SierraProgramWithDebug;
 use cairo_lang_sierra_generator::replace_ids::{DebugReplacer, SierraIdReplacer};
 use cairo_lang_starknet::contract::get_contracts_info;
+use cairo_lang_sierra::program::VersionedProgram;
 
 use crate::casm_run::format_next_item;
 use crate::{RunResultValue, ProfilingInfoCollectionConfig, SierraCasmRunner, StarknetState, RunResultStarknet};
@@ -95,6 +97,42 @@ pub fn run_with_input_program_string(
         }
     }
      */
+    generate_run_result_log(&result, print_full_memory, use_dbg_print_hint)
+}
+
+pub fn run_with_sierra_json_string(
+    sierra_json: &str,
+    available_gas: Option<usize>,
+    print_full_memory: bool,
+    run_profiler: bool,
+    use_dbg_print_hint: bool,
+) -> Result<String> {
+    let sierra_program = serde_json::from_str::<VersionedProgram>(sierra_json)
+        .with_context(|| format!("Failed to deserialize Sierra program. Input: {}", sierra_json))?
+        .into_v1()
+        .with_context(|| "Failed to load Sierra program")?;
+
+    if available_gas.is_none() && sierra_program.program.requires_gas_counter() {
+        anyhow::bail!("Program requires gas counter, please provide `--available-gas` argument.");
+    }
+
+    let runner = SierraCasmRunner::new(
+        sierra_program.program.clone(),
+        if available_gas.is_some() { Some(Default::default()) } else { None },
+        Default::default(),
+        if run_profiler { Some(ProfilingInfoCollectionConfig::default()) } else { None },
+    )
+    .map_err(|err| Error::msg(err.to_string()))?;
+
+    let result = runner
+        .run_function_with_starknet_context(
+            runner.find_function("::main").map_err(|err| Error::msg(err.to_string()))?,
+            &[],
+            available_gas,
+            StarknetState::default(),
+        )
+        .map_err(|err| Error::msg(err.to_string()))?;
+
     generate_run_result_log(&result, print_full_memory, use_dbg_print_hint)
 }
 
