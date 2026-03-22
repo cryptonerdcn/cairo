@@ -1,5 +1,9 @@
-use num_bigint::{BigInt, ToBigInt};
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
+use num_bigint::BigInt;
+
+use crate::hints::Hint;
 use crate::instructions::{Instruction, InstructionBody};
 use crate::operand::{DerefOrImmediate, Operation, Register, ResOperand};
 
@@ -53,8 +57,15 @@ pub enum Opcode {
     Ret,
 }
 
-/// The low level representation of a cairo instruction.
-#[allow(dead_code)]
+#[derive(Debug, Eq, PartialEq)]
+pub enum OpcodeExtension {
+    Stone,
+    Blake2s,
+    Blake2sFinalize,
+    QM31,
+}
+
+/// The low-level representation of a Cairo instruction.
 #[derive(Debug, Eq, PartialEq)]
 pub struct InstructionRepr {
     pub off0: i16,
@@ -69,6 +80,24 @@ pub struct InstructionRepr {
     pub ap_update: ApUpdate,
     pub fp_update: FpUpdate,
     pub opcode: Opcode,
+    pub opcode_extension: OpcodeExtension,
+}
+
+#[cfg(feature = "serde")]
+use cairo_lang_utils::bigint::{deserialize_big_ints, serialize_big_ints};
+
+/// An assembled representation of a Cairo program.
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(Debug, Clone)]
+pub struct AssembledCairoProgram {
+    /// The bytecode of the program.
+    #[cfg_attr(
+        feature = "serde",
+        serde(serialize_with = "serialize_big_ints", deserialize_with = "deserialize_big_ints")
+    )]
+    pub bytecode: Vec<BigInt>,
+    /// The list of hints, and the instruction index they refer to.
+    pub hints: Vec<(usize, Vec<Hint>)>,
 }
 
 impl Instruction {
@@ -90,6 +119,7 @@ impl Instruction {
                     ap_update: ApUpdate::Add,
                     fp_update: FpUpdate::Regular,
                     opcode: Opcode::Nop,
+                    opcode_extension: OpcodeExtension::Stone,
                 }
             }
             InstructionBody::AssertEq(insn) => {
@@ -107,6 +137,25 @@ impl Instruction {
                     ap_update: if self.inc_ap { ApUpdate::Add1 } else { ApUpdate::Regular },
                     fp_update: FpUpdate::Regular,
                     opcode: Opcode::AssertEq,
+                    opcode_extension: OpcodeExtension::Stone,
+                }
+            }
+            InstructionBody::QM31AssertEq(insn) => {
+                let res = insn.b.to_res_description();
+                InstructionRepr {
+                    off0: insn.a.offset,
+                    off1: res.off1,
+                    off2: res.off2,
+                    imm: res.imm,
+                    dst_register: insn.a.register,
+                    op0_register: res.op0_register,
+                    op1_addr: res.op1_addr,
+                    res: res.res,
+                    pc_update: PcUpdate::Regular,
+                    ap_update: if self.inc_ap { ApUpdate::Add1 } else { ApUpdate::Regular },
+                    fp_update: FpUpdate::Regular,
+                    opcode: Opcode::AssertEq,
+                    opcode_extension: OpcodeExtension::QM31,
                 }
             }
             InstructionBody::Call(insn) => {
@@ -125,6 +174,7 @@ impl Instruction {
                     ap_update: ApUpdate::Add2,
                     fp_update: FpUpdate::ApPlus2,
                     opcode: Opcode::Call,
+                    opcode_extension: OpcodeExtension::Stone,
                 }
             }
             InstructionBody::Jump(insn) => {
@@ -142,6 +192,7 @@ impl Instruction {
                     ap_update: if self.inc_ap { ApUpdate::Add1 } else { ApUpdate::Regular },
                     fp_update: FpUpdate::Regular,
                     opcode: Opcode::Nop,
+                    opcode_extension: OpcodeExtension::Stone,
                 }
             }
             InstructionBody::Jnz(insn) => {
@@ -159,6 +210,7 @@ impl Instruction {
                     ap_update: if self.inc_ap { ApUpdate::Add1 } else { ApUpdate::Regular },
                     fp_update: FpUpdate::Regular,
                     opcode: Opcode::Nop,
+                    opcode_extension: OpcodeExtension::Stone,
                 }
             }
             InstructionBody::Ret(_) => {
@@ -176,6 +228,29 @@ impl Instruction {
                     ap_update: ApUpdate::Regular,
                     fp_update: FpUpdate::Dst,
                     opcode: Opcode::Ret,
+                    opcode_extension: OpcodeExtension::Stone,
+                }
+            }
+            InstructionBody::Blake2sCompress(insn) => {
+                assert!(self.inc_ap);
+                InstructionRepr {
+                    off0: insn.byte_count.offset,
+                    off1: insn.state.offset,
+                    off2: insn.message.offset,
+                    imm: None,
+                    dst_register: insn.byte_count.register,
+                    op0_register: insn.state.register,
+                    op1_addr: insn.message.register.to_op1_addr(),
+                    res: Res::Op1,
+                    pc_update: PcUpdate::Regular,
+                    ap_update: ApUpdate::Add1,
+                    fp_update: FpUpdate::Regular,
+                    opcode: Opcode::Nop,
+                    opcode_extension: if insn.finalize {
+                        OpcodeExtension::Blake2sFinalize
+                    } else {
+                        OpcodeExtension::Blake2s
+                    },
                 }
             }
         }
@@ -201,14 +276,13 @@ impl Operation {
 }
 
 impl DerefOrImmediate {
-    fn to_res_operand(&self) -> ResOperand {
-        match self {
-            DerefOrImmediate::Deref(operand) => ResOperand::Deref(*operand),
-            DerefOrImmediate::Immediate(operand) => ResOperand::Immediate(operand.clone()),
-        }
-    }
     fn to_res_description(&self) -> ResDescription {
-        self.to_res_operand().to_res_description()
+        match self {
+            DerefOrImmediate::Deref(operand) => ResOperand::Deref(*operand).to_res_description(),
+            DerefOrImmediate::Immediate(operand) => {
+                ResOperand::Immediate(operand.clone()).to_res_description()
+            }
+        }
     }
 }
 
@@ -244,8 +318,7 @@ impl ResOperand {
             ResOperand::Immediate(operand) => ResDescription {
                 off1: -1,
                 off2: 1,
-                // TODO(alon): Change immediate to always work with bigint.
-                imm: operand.value.to_bigint(),
+                imm: Some(operand.value.clone()),
                 op0_register: Register::FP,
                 op1_addr: Op1Addr::Imm,
                 res: Res::Op1,

@@ -1,24 +1,23 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
-use cairo_lang_utils::ordered_hash_set::OrderedHashSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use smol_str::SmolStr;
 
 /// Option for the `#[cfg(...)]` language attribute.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Cfg {
-    pub key: SmolStr,
-    pub value: Option<SmolStr>,
+    pub key: String,
+    pub value: Option<String>,
 }
 
 impl Cfg {
-    /// Creates an `cfg` option that is matchable as `#[cfg(name)]`.
-    pub fn name(name: impl Into<SmolStr>) -> Self {
+    /// Creates a `cfg` option that is matchable as `#[cfg(name)]`.
+    pub fn name(name: impl Into<String>) -> Self {
         Self { key: name.into(), value: None }
     }
 
-    /// Creates an `cfg` option that is matchable as `#[cfg(key: "value")]`.
-    pub fn kv(key: impl Into<SmolStr>, value: impl Into<SmolStr>) -> Self {
+    /// Creates a `cfg` option that is matchable as `#[cfg(key: "value")]`.
+    pub fn kv(key: impl Into<String>, value: impl Into<String>) -> Self {
         Self { key: key.into(), value: Some(value.into()) }
     }
 }
@@ -43,13 +42,12 @@ impl fmt::Debug for Cfg {
 
 mod serde_ext {
     use serde::{Deserialize, Serialize};
-    use smol_str::SmolStr;
 
     #[derive(Serialize, Deserialize)]
     #[serde(untagged)]
     pub enum Cfg {
-        KV(SmolStr, SmolStr),
-        Name(SmolStr),
+        KV(String, String),
+        Name(String),
     }
 }
 
@@ -78,15 +76,15 @@ impl<'de> Deserialize<'de> for Cfg {
 ///
 /// Behaves like a multimap, i.e. it permits storing multiple values for the same key.
 /// This allows expressing, for example, the `feature` option that Rust/Cargo does.
-#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CfgSet(OrderedHashSet<Cfg>);
+#[derive(Clone, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct CfgSet(BTreeSet<Cfg>);
 
 impl CfgSet {
     /// Creates an empty `CfgSet`.
     ///
     /// This function does not allocate.
     pub fn new() -> Self {
-        Self(OrderedHashSet::new())
+        Self(BTreeSet::new())
     }
 
     /// Returns the number of elements in the set.
@@ -104,12 +102,14 @@ impl CfgSet {
         self.0.insert(cfg);
     }
 
-    /// Combines two sets into new one.
+    /// Combines two sets into a new one.
     pub fn union(&self, other: &Self) -> Self {
         Self(self.0.union(&other.0).cloned().collect())
     }
 
-    /// An iterator visiting all elements in insertion order.
+    /// An iterator visiting all elements in ascending sorted order.
+    ///
+    /// Elements are returned in order according to the `Ord` implementation of `Cfg`.
     pub fn iter(&self) -> impl Iterator<Item = &Cfg> {
         self.0.iter()
     }
@@ -134,7 +134,7 @@ impl CfgSet {
 
 impl IntoIterator for CfgSet {
     type Item = Cfg;
-    type IntoIter = <OrderedHashSet<Cfg> as IntoIterator>::IntoIter;
+    type IntoIter = <BTreeSet<Cfg> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -143,7 +143,7 @@ impl IntoIterator for CfgSet {
 
 impl<'a> IntoIterator for &'a CfgSet {
     type Item = &'a Cfg;
-    type IntoIter = <&'a OrderedHashSet<Cfg> as IntoIterator>::IntoIter;
+    type IntoIter = <&'a BTreeSet<Cfg> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
@@ -207,7 +207,7 @@ mod tests {
 
         let json = serde_json::to_value(&cfg).unwrap();
 
-        assert_eq!(json, json!(["name", ["k", "a"], "name2", ["k", "b"]]));
+        assert_eq!(json, json!([["k", "a"], ["k", "b"], "name", "name2"]));
 
         let serde_cfg = serde_json::from_value::<CfgSet>(json).unwrap();
 

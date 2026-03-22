@@ -1,18 +1,38 @@
-#[cfg(test)]
-#[path = "span_test.rs"]
-mod test;
-
 use std::iter::Sum;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Range, Sub};
+
+use cairo_lang_proc_macros::HeapSize;
+use salsa::Database;
+use serde::{Deserialize, Serialize};
 
 use crate::db::FilesGroup;
 use crate::ids::FileId;
 
-/// Byte length of a utf8 string.
-// Note: The wrapped value is private to make sure no one gets confused with non utf8 sizes.
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg(test)]
+#[path = "span_test.rs"]
+mod test;
+
+/// Byte length of a UTF-8 string.
+// This wrapper type is used to avoid confusion with non-UTF-8 sizes.
+#[derive(
+    Copy,
+    Clone,
+    Default,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    salsa::Update,
+    HeapSize,
+)]
 pub struct TextWidth(u32);
 impl TextWidth {
+    pub const ZERO: Self = Self(0);
+
     pub fn from_char(c: char) -> Self {
         Self(c.len_utf8() as u32)
     }
@@ -22,6 +42,24 @@ impl TextWidth {
     }
     pub fn new_for_testing(value: u32) -> Self {
         Self(value)
+    }
+    /// Creates a `TextWidth` at the given index of a string.
+    ///
+    /// The index is required to be a char boundary.
+    /// This function runs a debug assertion to verify this,
+    /// while retains performance on release builds.
+    pub fn at(s: &str, index: usize) -> Self {
+        debug_assert!(
+            s.is_char_boundary(index),
+            "cannot create a TextWidth outside of a char boundary"
+        );
+        Self(index as u32)
+    }
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+    pub fn as_offset(self) -> TextOffset {
+        TextOffset(self)
     }
 }
 impl Add for TextWidth {
@@ -44,18 +82,42 @@ impl Sum for TextWidth {
     }
 }
 
-/// Byte offset inside a utf8 string.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Byte offset inside a UTF-8 string.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    salsa::Update,
+    HeapSize,
+)]
 pub struct TextOffset(TextWidth);
 impl TextOffset {
-    pub fn add_width(&self, width: TextWidth) -> Self {
+    pub const START: Self = Self(TextWidth::ZERO);
+
+    /// Creates a `TextOffset` at the end of a given string.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(content: &str) -> Self {
+        Self(TextWidth::from_str(content))
+    }
+    pub fn add_width(self, width: TextWidth) -> Self {
         TextOffset(self.0 + width)
     }
-    pub fn sub_width(&self, width: TextWidth) -> Self {
+    pub fn sub_width(self, width: TextWidth) -> Self {
         TextOffset(self.0 - width)
     }
-    pub fn take_from<'a>(&self, content: &'a str) -> &'a str {
+    pub fn take_from(self, content: &str) -> &str {
         &content[(self.0.0 as usize)..]
+    }
+    pub fn as_u32(self) -> u32 {
+        self.0.as_u32()
     }
 }
 impl Sub for TextOffset {
@@ -66,32 +128,83 @@ impl Sub for TextOffset {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+/// A range of text offsets that form a span (like text selection).
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    HeapSize,
+)]
 pub struct TextSpan {
     pub start: TextOffset,
     pub end: TextOffset,
 }
 impl TextSpan {
-    pub fn width(&self) -> TextWidth {
+    /// Creates a `TextSpan` from a start and end offset.
+    pub fn new(start: TextOffset, end: TextOffset) -> Self {
+        Self { start, end }
+    }
+    /// Creates a `TextSpan` from a start offset and a width.
+    pub fn new_with_width(start: TextOffset, width: TextWidth) -> Self {
+        Self::new(start, start.add_width(width))
+    }
+    /// Creates a `TextSpan` of width 0, located at the given offset.
+    pub fn cursor(offset: TextOffset) -> Self {
+        Self::new(offset, offset)
+    }
+    /// Creates a `TextSpan` for the entirety of a given string.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(content: &str) -> Self {
+        Self::new(TextOffset::START, TextOffset::from_str(content))
+    }
+    pub fn width(self) -> TextWidth {
         self.end - self.start
     }
-    pub fn contains(&self, other: Self) -> bool {
+    pub fn contains(self, other: Self) -> bool {
         self.start <= other.start && self.end >= other.end
     }
-    pub fn take<'b>(&self, content: &'b str) -> &'b str {
+    pub fn take(self, content: &str) -> &str {
         &content[(self.start.0.0 as usize)..(self.end.0.0 as usize)]
     }
-    pub fn n_chars(&self, content: &str) -> usize {
+    pub fn n_chars(self, content: &str) -> usize {
         self.take(content).chars().count()
     }
-    /// Get the span of width 0, located right after this span.
-    pub fn after(&self) -> Self {
-        Self { start: self.end, end: self.end }
+    /// Gets the span of width 0, located right after this span.
+    pub fn after(self) -> Self {
+        Self::cursor(self.end)
+    }
+    /// Gets the span of width 0, located right at the beginning of this span.
+    pub fn start_only(self) -> Self {
+        Self::cursor(self.start)
+    }
+
+    /// Returns self.start..self.end as [`Range<usize>`]
+    pub fn to_str_range(&self) -> Range<usize> {
+        self.start.0.0 as usize..self.end.0.0 as usize
+    }
+
+    /// Convert this span to a [`TextPositionSpan`] in the file.
+    pub fn position_in_file<'db>(
+        self,
+        db: &'db dyn Database,
+        file: FileId<'db>,
+    ) -> Option<TextPositionSpan> {
+        let start = self.start.position_in_file(db, file)?;
+        let end = self.end.position_in_file(db, file)?;
+        Some(TextPositionSpan { start, end })
     }
 }
 
-/// Human readable position inside a file, in lines and characters.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Human-readable position inside a file, in lines and characters.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TextPosition {
     /// Line index, 0 based.
     pub line: usize,
@@ -99,37 +212,88 @@ pub struct TextPosition {
     pub col: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FileSummary {
-    pub line_offsets: Vec<TextOffset>,
-    pub last_offset: TextOffset,
-}
-
 impl TextOffset {
-    pub fn get_line_number(&self, db: &dyn FilesGroup, file: FileId) -> Option<usize> {
+    fn get_line_number(self, db: &dyn Database, file: FileId<'_>) -> Option<usize> {
         let summary = db.file_summary(file)?;
         assert!(
-            *self <= summary.last_offset,
+            self <= summary.last_offset,
             "TextOffset out of range. {:?} > {:?}.",
             self.0,
             summary.last_offset.0
         );
-        Some(summary.line_offsets.binary_search(self).unwrap_or_else(|x| x - 1))
+        Some(summary.line_offsets.binary_search(&self).unwrap_or_else(|x| x - 1))
     }
 
-    pub fn position_in_file(&self, db: &dyn FilesGroup, file: FileId) -> Option<TextPosition> {
+    /// Convert this offset to an equivalent [`TextPosition`] in the file.
+    pub fn position_in_file(self, db: &dyn Database, file: FileId<'_>) -> Option<TextPosition> {
         let summary = db.file_summary(file)?;
         let line_number = self.get_line_number(db, file)?;
         let line_offset = summary.line_offsets[line_number];
         let content = db.file_content(file)?;
-        let col = TextSpan { start: line_offset, end: *self }.n_chars(&content);
+        let col = TextSpan::new(line_offset, self).n_chars(content.as_ref());
         Some(TextPosition { line: line_number, col })
     }
 }
 
+impl TextPosition {
+    /// Convert this position to an equivalent [`TextOffset`] in the file.
+    ///
+    /// If `line` or `col` are out of range, the offset will be clamped to the end of file, or end
+    /// of line respectively.
+    ///
+    /// Returns `None` if file is not found in `db`.
+    pub fn offset_in_file(self, db: &dyn Database, file: FileId<'_>) -> Option<TextOffset> {
+        let file_summary = db.file_summary(file)?;
+        let content = db.file_content(file)?;
+
+        // Get the offset of the first character in line, or clamp to the last offset in the file.
+        let mut offset =
+            file_summary.line_offsets.get(self.line).copied().unwrap_or(file_summary.last_offset);
+
+        // Add the column offset, or clamp to the last character in line.
+        offset = offset.add_width(
+            offset
+                .take_from(content.as_ref())
+                .chars()
+                .take_while(|c| *c != '\n')
+                .take(self.col)
+                .map(TextWidth::from_char)
+                .sum(),
+        );
+
+        Some(offset)
+    }
+}
+
+/// A set of offset-related information about a file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileSummary {
+    /// Starting offsets of all lines in this file.
+    pub line_offsets: Vec<TextOffset>,
+    /// Offset of the last character in the file.
+    pub last_offset: TextOffset,
+}
 impl FileSummary {
-    /// Gets the number of lines
+    /// Gets the number of lines.
     pub fn line_count(&self) -> usize {
         self.line_offsets.len()
+    }
+}
+
+/// A range of text positions that form a span (like text selection).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TextPositionSpan {
+    pub start: TextPosition,
+    pub end: TextPosition,
+}
+
+impl TextPositionSpan {
+    /// Convert this span to a [`TextSpan`] in the file.
+    pub fn offset_in_file<'db>(
+        Self { start, end }: Self,
+        db: &'db dyn Database,
+        file: FileId<'db>,
+    ) -> Option<TextSpan> {
+        Some(TextSpan::new(start.offset_in_file(db, file)?, end.offset_in_file(db, file)?))
     }
 }

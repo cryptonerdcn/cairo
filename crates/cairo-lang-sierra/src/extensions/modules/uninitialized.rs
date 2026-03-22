@@ -1,7 +1,8 @@
+use crate::extensions::SpecializationError;
+use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::types::{
     GenericTypeArgGenericType, GenericTypeArgGenericTypeWrapper, TypeInfo,
 };
-use crate::extensions::SpecializationError;
 use crate::ids::GenericTypeId;
 
 /// Uninitialized value of type T.
@@ -12,16 +13,17 @@ impl GenericTypeArgGenericType for UninitializedTypeWrapped {
 
     fn calc_info(
         &self,
+        _context: &dyn TypeSpecializationContext,
         long_id: crate::program::ConcreteTypeLongId,
-        TypeInfo { storable, zero_sized, .. }: TypeInfo,
+        wrapped_info: &TypeInfo,
     ) -> Result<TypeInfo, SpecializationError> {
-        if storable {
+        if wrapped_info.storable {
             Ok(TypeInfo {
                 long_id,
                 storable: false,
                 droppable: true,
                 duplicatable: false,
-                zero_sized,
+                zero_sized: wrapped_info.zero_sized,
             })
         } else {
             Err(SpecializationError::UnsupportedGenericArg)

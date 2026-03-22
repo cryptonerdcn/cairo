@@ -15,7 +15,8 @@
 
 [![GitHub Workflow Status](https://github.com/starkware-libs/cairo/actions/workflows/ci.yml/badge.svg)](https://github.com/starkware-libs/cairo/actions/workflows/ci.yml)
 [![Project license](https://img.shields.io/github/license/starkware-libs/cairo.svg?style=flat-square)](LICENSE)
-[![Pull Requests welcome](https://img.shields.io/badge/PRs-welcome-ff69b4.svg?style=flat-square)](https://github.com/starkware-libs/cairo/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+[![Releases](https://img.shields.io/github/v/release/starkware-libs/cairo)](https://github.com/starkware-libs/cairo/releases)
+[![Pull Requests welcome](https://img.shields.io/badge/PRs-welcome-ff69b4.svg?style=flat-square)](https://github.com/starkware-libs/cairo/blob/main/docs/CONTRIBUTING.md)
 
 </div>
 
@@ -26,8 +27,7 @@
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Compiling and running Cairo files](#compiling-and-running-cairo-files)
-  - [Development](#development)
-    - [Install the language server](#install-the-language-server)
+  - [Compiling Starknet Contracts](#compiling-starknet-contracts)
 - [Roadmap](#roadmap)
 - [Support](#support)
 - [Project assistance](#project-assistance)
@@ -42,19 +42,19 @@
 
 ## About
 
-Cairo is the first Turing-complete language for creating provable programs for general computation.
+**[Cairo](https://cairo-lang.org/)** is the first Turing-complete language for creating provable programs for general computation.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Install [Rust](https://www.rust-lang.org/tools/install)
-- Setup Rust:
+- Set up Rust:
 ```bash
 rustup override set stable && rustup update
 ```
 
-Ensure rust was installed correctly by running the following from the root project directory:
+Ensure Rust was installed correctly by running the following from the root project directory:
 ```bash
 cargo test
 ```
@@ -63,7 +63,7 @@ cargo test
 
 Compile Cairo to Sierra:
 ```bash
-cargo run --bin cairo-compile -- /path/to/input.cairo /path/to/output.sierra --replace-ids
+cargo run --bin cairo-compile -- --single-file /path/to/input.cairo /path/to/output.sierra --replace-ids
 ```
 
 Compile Sierra to casm (Cairo assembly):
@@ -73,7 +73,7 @@ cargo run --bin sierra-compile -- /path/to/input.sierra /path/to/output.casm
 
 Run Cairo code directly:
 ```bash
-cargo run --bin cairo-run -- /path/to/file.cairo
+cargo run --bin cairo-run -- --single-file /path/to/file.cairo
 ```
 
 See more information [here](./crates/cairo-lang-runner/README.md). You can also find Cairo examples in the [examples](./examples) directory.
@@ -84,7 +84,7 @@ For running tests specifically, see here: [cairo-test](./crates/cairo-lang-test-
 
 Compile a Starknet Contract to a Sierra ContractClass:
 ```bash
-cargo run --bin starknet-compile -- /path/to/input.cairo /path/to/output.json
+cargo run --bin starknet-compile -- --single-file /path/to/input.cairo /path/to/output.json
 ```
 
 Or specify the contract path if multiple contracts are defined in the same project:
@@ -92,16 +92,10 @@ Or specify the contract path if multiple contracts are defined in the same proje
 cargo run --bin starknet-compile -- /path/to/input/crate /path/to/output.json --contract-path path::to::contract
 ```
 
-Compile the ContractClass of a CompiledClass:
+Compile a Sierra ContractClass to a CASM CompiledClass:
 ```bash
 cargo run --bin starknet-sierra-compile -- /path/to/input.json /path/to/output.casm
 ```
-
-### Development
-
-#### Install the language server
-
-Follow the instructions in [vscode-cairo](./vscode-cairo/README.md).
 
 ## Roadmap
 
@@ -110,12 +104,12 @@ You can track the exact progress [here](./docs/FEATURE_PARITY.md).
 
 ## Support
 
-- We encourage developers to ask and answer questions on [stackoverflow](https://stackoverflow.com/questions/tagged/cairo-lang).
-- Contact options listed on [this GitHub profile](https://github.com/starkware-libs)
+- We encourage developers to ask and answer questions on [Stack Overflow](https://stackoverflow.com/questions/tagged/cairo-lang).
+- Contact options are listed on [this GitHub profile](https://github.com/starkware-libs)
 
 ## Project assistance
 
-If you want to say **thank you** or/and support active development of Cairo:
+If you want to say **thank you** and/or support active development of Cairo:
 
 - Add a [GitHub Star](https://github.com/starkware-libs/cairo) to the project.
 - Tweet about your Cairo work.
@@ -142,6 +136,6 @@ _For more information and to report security issues, please refer to our [securi
 
 ## License
 
-This project is licensed under the **Apache 2.0**.
+This project is licensed under the **Apache 2.0** license.
 
 See [LICENSE](LICENSE) for more information.

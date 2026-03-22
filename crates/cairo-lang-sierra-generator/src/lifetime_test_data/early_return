@@ -14,8 +14,6 @@ fn foo(x: felt252) -> felt252 {
     x
 }
 
-//! > module_code
-
 //! > lowering_format
 Parameters: v0: core::felt252
 blk0 (root):
@@ -23,14 +21,14 @@ Statements:
 End:
   Match(match core::felt252_is_zero(v0) {
     IsZeroResult::Zero => blk1,
-    IsZeroResult::NonZero(v2) => blk2,
+    IsZeroResult::NonZero(v1) => blk2,
   })
 
 blk1:
 Statements:
-  (v1: core::felt252) <- 0u
+  (v2: core::felt252) <- 0
 End:
-  Return(v1)
+  Return(v2)
 
 blk2:
 Statements:
@@ -38,12 +36,16 @@ End:
   Return(v0)
 
 //! > last_use
-v0: ((BlockId(2), 0), 0)
-v1: ((BlockId(1), 1), 0)
+v0: ((blk2, 0), 0)
+v2: ((blk1, 1), 0)
 
 //! > drops
-BeginningOfBlock(BlockId(2)): v2
-BeginningOfBlock(BlockId(1)): v0
+BeginningOfBlock(blk2): v1
+BeginningOfBlock(blk1): v0
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
 
 //! > ==========================================================================
 
@@ -63,8 +65,6 @@ fn foo(x: felt252, y: felt252) -> felt252 {
     x + 1
 }
 
-//! > module_code
-
 //! > lowering_format
 Parameters: v0: core::felt252, v1: core::felt252
 blk0 (root):
@@ -73,10 +73,18 @@ End:
   Return(v1)
 
 //! > last_use
-v1: ((BlockId(0), 0), 0)
+v1: ((blk0, 0), 0)
 
 //! > drops
-BeginningOfBlock(BlockId(0)): v0
+BeginningOfBlock(blk0): v0
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+warning[E3000]: Unreachable code
+ --> lib.cairo:5:5
+    x + 1
+    ^^^^^
 
 //! > ==========================================================================
 
@@ -98,8 +106,6 @@ fn foo(x: felt252, y: felt252) -> felt252 {
     x + y
 }
 
-//! > module_code
-
 //! > lowering_format
 Parameters: v0: core::felt252, v1: core::felt252
 blk0 (root):
@@ -107,26 +113,34 @@ Statements:
 End:
   Match(match core::felt252_is_zero(v0) {
     IsZeroResult::Zero => blk1,
-    IsZeroResult::NonZero(v3) => blk2,
+    IsZeroResult::NonZero(v2) => blk2,
   })
 
 blk1:
 Statements:
-  (v2: core::felt252) <- 1u
+  (v3: core::felt252) <- 1
 End:
-  Return(v2)
+  Return(v3)
 
 blk2:
 Statements:
-  (v4: core::felt252) <- 2u
+  (v4: core::felt252) <- 2
 End:
   Return(v4)
 
 //! > last_use
-v4: ((BlockId(2), 1), 0)
-v2: ((BlockId(1), 1), 0)
-v0: ((BlockId(0), 0), 0)
+v4: ((blk2, 1), 0)
+v3: ((blk1, 1), 0)
+v0: ((blk0, 0), 0)
 
 //! > drops
-BeginningOfBlock(BlockId(2)): v3
-BeginningOfBlock(BlockId(0)): v1
+BeginningOfBlock(blk2): v2
+BeginningOfBlock(blk0): v1
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+warning[E3000]: Unreachable code
+ --> lib.cairo:7:5
+    x + y
+    ^^^^^

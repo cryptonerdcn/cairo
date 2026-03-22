@@ -1,7 +1,7 @@
 # Testing cairo files
 
 ```
-cargo run --bin cairo-test -- /path/to/file.cairo
+cargo run --bin cairo-test -- --single-file /path/to/file.cairo
 ```
 
 We can use this command to run Cairo level tests.
@@ -11,7 +11,7 @@ We can use this command to run Cairo level tests.
 ```
 #[test]
 fn test_assert_true() {
-    // Asserts that true
+    // Asserts that true is true.
     assert(true, 'assert(true)');
 }
 
@@ -24,7 +24,7 @@ fn test_assert_false() {
 
 # Longer Example
 
-Longer example can be found at [Core Library Test](../../corelib/src/test.cairo).
+A longer example can be found at [Core Library Test](../../corelib/src/test.cairo).
 
 ```
 cargo run --bin cairo-test -- corelib/
@@ -36,5 +36,5 @@ You can run only tests containing a given string using `-f <filter_string>`.
 For example:
 
 ```
-cargo run --bin cairo-test -- /path/to/file.cairo -f specific_test
+cargo run --bin cairo-test -- --single-file /path/to/file.cairo -f specific_test
 ```

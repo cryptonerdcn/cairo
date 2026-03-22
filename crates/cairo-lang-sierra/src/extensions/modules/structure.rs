@@ -14,15 +14,19 @@
 use cairo_lang_utils::try_extract_matches;
 
 use super::snapshot::snapshot_ty;
+use super::utils::peel_snapshot;
 use crate::define_libfunc_hierarchy;
+use crate::extensions::boxing::box_ty;
 use crate::extensions::lib_func::{
     DeferredOutputKind, LibfuncSignature, OutputVarInfo, ParamSignature, SierraApChange,
-    SignatureOnlyGenericLibfunc, SignatureSpecializationContext,
+    SignatureOnlyGenericLibfunc, SignatureSpecializationContext, SpecializationContext,
 };
 use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::types::TypeInfo;
+use crate::extensions::utils::ty_with_optional_snapshot;
 use crate::extensions::{
-    args_as_single_type, ConcreteType, NamedType, OutputVarReferenceInfo, SpecializationError,
+    ConcreteType, NamedLibfunc, NamedType, OutputVarReferenceInfo, SignatureBasedConcreteLibfunc,
+    SpecializationError, args_as_single_type,
 };
 use crate::ids::{ConcreteTypeId, GenericTypeId};
 use crate::program::{ConcreteTypeLongId, GenericArg};
@@ -59,15 +63,16 @@ impl StructConcreteType {
             .ok_or(SpecializationError::UnsupportedGenericArg)?;
         let mut duplicatable = true;
         let mut droppable = true;
-        let mut members: Vec<ConcreteTypeId> = Vec::new();
+        let mut storable = true;
+        let mut members: Vec<ConcreteTypeId> = Vec::with_capacity(args_iter.len());
         let mut zero_sized = true;
         for arg in args_iter {
             let ty = try_extract_matches!(arg, GenericArg::Type)
                 .ok_or(SpecializationError::UnsupportedGenericArg)?
                 .clone();
-            let info = context.get_type_info(ty.clone())?;
+            let info = context.get_type_info(&ty)?;
             if !info.storable {
-                return Err(SpecializationError::UnsupportedGenericArg);
+                storable = false;
             }
             if !info.duplicatable {
                 duplicatable = false;
@@ -86,11 +91,31 @@ impl StructConcreteType {
                 },
                 duplicatable,
                 droppable,
-                storable: true,
+                storable,
                 zero_sized,
             },
             members,
         })
+    }
+
+    /// Returns the StructConcreteType of the given long id, or a specialization error if not
+    /// possible.
+    fn try_from_long_id(
+        context: &dyn SignatureSpecializationContext,
+        long_id: &ConcreteTypeLongId,
+    ) -> Result<Self, SpecializationError> {
+        if long_id.generic_id != StructType::ID {
+            return Err(SpecializationError::UnsupportedGenericArg);
+        }
+        Self::new(context, &long_id.generic_args)
+    }
+
+    /// Returns the StructConcreteType of the given type, or a specialization error if not possible.
+    pub fn try_from_concrete_type(
+        context: &dyn SignatureSpecializationContext,
+        ty: &ConcreteTypeId,
+    ) -> Result<Self, SpecializationError> {
+        Self::try_from_long_id(context, &context.get_type_info(ty)?.long_id)
     }
 }
 impl ConcreteType for StructConcreteType {
@@ -104,6 +129,7 @@ define_libfunc_hierarchy! {
         Construct(StructConstructLibfunc),
         Deconstruct(StructDeconstructLibfunc),
         SnapshotDeconstruct(StructSnapshotDeconstructLibfunc),
+        BoxedDeconstruct(StructBoxedDeconstructLibfunc),
     }, StructConcreteLibfunc
 }
 
@@ -119,10 +145,22 @@ impl SignatureOnlyGenericLibfunc for StructConstructLibfunc {
         args: &[GenericArg],
     ) -> Result<LibfuncSignature, SpecializationError> {
         let struct_type = args_as_single_type(args)?;
-        let generic_args = context.get_type_info(struct_type.clone())?.long_id.generic_args;
+        let type_info = context.get_type_info(struct_type)?;
         let member_types =
-            StructConcreteType::new(context.as_type_specialization_context(), &generic_args)?
-                .members;
+            StructConcreteType::try_from_long_id(context, &type_info.long_id)?.members;
+
+        let mut opt_same_as_param_idx = None;
+        for (idx, ty) in member_types.iter().enumerate() {
+            if !context.get_type_info(ty)?.zero_sized {
+                if opt_same_as_param_idx.is_some() {
+                    // There are multiple non-zero sized items, can't use the same param.
+                    opt_same_as_param_idx = None;
+                    break;
+                }
+                opt_same_as_param_idx = Some(idx);
+            }
+        }
+
         Ok(LibfuncSignature::new_non_branch_ex(
             member_types
                 .into_iter()
@@ -134,8 +172,14 @@ impl SignatureOnlyGenericLibfunc for StructConstructLibfunc {
                 })
                 .collect(),
             vec![OutputVarInfo {
-                ty: struct_type,
-                ref_info: OutputVarReferenceInfo::Deferred(DeferredOutputKind::Generic),
+                ty: struct_type.clone(),
+                ref_info: if type_info.zero_sized {
+                    OutputVarReferenceInfo::ZeroSized
+                } else if let Some(param_idx) = opt_same_as_param_idx {
+                    OutputVarReferenceInfo::SameAsParam { param_idx }
+                } else {
+                    OutputVarReferenceInfo::Deferred(DeferredOutputKind::Generic)
+                },
             }],
             SierraApChange::Known { new_vars_only: true },
         ))
@@ -154,26 +198,30 @@ impl SignatureOnlyGenericLibfunc for StructDeconstructLibfunc {
         args: &[GenericArg],
     ) -> Result<LibfuncSignature, SpecializationError> {
         let struct_type = args_as_single_type(args)?;
-        let generic_args = context.get_type_info(struct_type.clone())?.long_id.generic_args;
         let member_types =
-            StructConcreteType::new(context.as_type_specialization_context(), &generic_args)?
-                .members;
+            StructConcreteType::try_from_concrete_type(context, struct_type)?.members;
         Ok(LibfuncSignature::new_non_branch_ex(
             vec![ParamSignature {
-                ty: struct_type,
+                ty: struct_type.clone(),
                 allow_deferred: true,
                 allow_add_const: false,
                 allow_const: true,
             }],
             member_types
                 .into_iter()
-                .map(|ty| OutputVarInfo {
-                    ty,
-                    // All memory of the deconstruction would have the same lifetime as the first
-                    // param - as it is its deconstruction.
-                    ref_info: OutputVarReferenceInfo::PartialParam { param_idx: 0 },
+                .map(|ty| {
+                    Ok(OutputVarInfo {
+                        ref_info: if context.get_type_info(&ty)?.zero_sized {
+                            OutputVarReferenceInfo::ZeroSized
+                        } else {
+                            // All memory of the deconstruction would have the same lifetime as the
+                            // first param - as it is its deconstruction.
+                            OutputVarReferenceInfo::PartialParam { param_idx: 0 }
+                        },
+                        ty,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
             SierraApChange::Known { new_vars_only: true },
         ))
     }
@@ -191,24 +239,139 @@ impl SignatureOnlyGenericLibfunc for StructSnapshotDeconstructLibfunc {
         args: &[GenericArg],
     ) -> Result<LibfuncSignature, SpecializationError> {
         let struct_type = args_as_single_type(args)?;
-        let generic_args = context.get_type_info(struct_type.clone())?.long_id.generic_args;
         let member_types =
-            StructConcreteType::new(context.as_type_specialization_context(), &generic_args)?
-                .members;
+            StructConcreteType::try_from_concrete_type(context, struct_type)?.members;
         Ok(LibfuncSignature::new_non_branch(
-            vec![snapshot_ty(context, struct_type)?],
+            vec![snapshot_ty(context, struct_type.clone())?],
             member_types
                 .into_iter()
                 .map(|ty| {
                     Ok(OutputVarInfo {
+                        ref_info: if context.get_type_info(&ty)?.zero_sized {
+                            OutputVarReferenceInfo::ZeroSized
+                        } else {
+                            // All memory of the deconstruction would have the same lifetime as the
+                            // first param - as it is its deconstruction.
+                            OutputVarReferenceInfo::PartialParam { param_idx: 0 }
+                        },
                         ty: snapshot_ty(context, ty)?,
-                        // All memory of the deconstruction would have the same lifetime as the
-                        // first param - as it is its deconstruction.
-                        ref_info: OutputVarReferenceInfo::PartialParam { param_idx: 0 },
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             SierraApChange::Known { new_vars_only: true },
         ))
+    }
+}
+
+/// Concrete implementation of the boxed struct deconstruct libfunc.
+pub struct ConcreteStructBoxedDeconstructLibfunc {
+    /// The concrete types of the struct members (no additional snapshots and boxing) that will be
+    /// extracted as boxed values.
+    pub members: Vec<ConcreteTypeId>,
+    signature: LibfuncSignature,
+}
+
+impl SignatureBasedConcreteLibfunc for ConcreteStructBoxedDeconstructLibfunc {
+    fn signature(&self) -> &LibfuncSignature {
+        &self.signature
+    }
+}
+
+/// Libfunc for deconstructing a boxed struct into boxes of its members.
+#[derive(Default)]
+pub struct StructBoxedDeconstructLibfunc {}
+
+impl StructBoxedDeconstructLibfunc {
+    /// Analyzes a struct type to extract member types and snapshot information.
+    ///
+    /// This method handles both regular structs and snapshot-wrapped structs. For snapshot-wrapped
+    /// structs (e.g., `@StructType`), it unwraps the snapshot to get the underlying struct type,
+    /// then extracts the member types and indicates the snapshot status.
+    ///
+    /// # Returns `Result` of
+    /// - `Vec<ConcreteTypeId>`: The concrete types of each struct member
+    /// - `bool`: Whether the input struct was wrapped in a snapshot
+    fn analyze_struct_type(
+        context: &dyn SignatureSpecializationContext,
+        ty: &ConcreteTypeId,
+    ) -> Result<(Vec<ConcreteTypeId>, bool), SpecializationError> {
+        let type_info = context.get_type_info(ty)?;
+        let (inner_ty, is_snapshot) = peel_snapshot(ty, type_info)?;
+        let struct_type = StructConcreteType::try_from_concrete_type(context, inner_ty)?;
+        Ok((struct_type.members, is_snapshot))
+    }
+
+    /// Creates the libfunc signature for boxed struct deconstruction.
+    ///
+    /// # Parameters
+    /// - `ty`: The concrete type ID of the struct being deconstructed
+    /// - `member_types`: The concrete types of each struct member
+    /// - `is_snapshot`: Whether the struct was originally wrapped in a snapshot
+    ///
+    /// # Returns
+    /// A libfunc signature that takes a boxed struct as input and returns boxed versions
+    /// of each member. If `is_snapshot` is true, the members are also wrapped in snapshots.
+    fn create_signature(
+        context: &dyn SignatureSpecializationContext,
+        ty: ConcreteTypeId,
+        mut member_types: impl ExactSizeIterator<Item = ConcreteTypeId>,
+        is_snapshot: bool,
+    ) -> Result<LibfuncSignature, SpecializationError> {
+        let mut outputs = Vec::with_capacity(member_types.len());
+
+        for member_ty in member_types.by_ref() {
+            let ref_info = OutputVarReferenceInfo::SameAsParam { param_idx: 0 };
+            outputs.push(OutputVarInfo {
+                ty: box_ty(
+                    context,
+                    ty_with_optional_snapshot(context, member_ty.clone(), is_snapshot)?,
+                )?,
+                ref_info,
+            });
+            if !context.get_type_info(&member_ty)?.zero_sized {
+                break;
+            }
+        }
+
+        for member_ty in member_types {
+            let ref_info = OutputVarReferenceInfo::Deferred(DeferredOutputKind::AddConst);
+            outputs.push(OutputVarInfo {
+                ty: box_ty(context, ty_with_optional_snapshot(context, member_ty, is_snapshot)?)?,
+                ref_info,
+            });
+        }
+
+        Ok(LibfuncSignature::new_non_branch_ex(
+            vec![ParamSignature::new(box_ty(context, ty)?).with_allow_add_const()],
+            outputs,
+            SierraApChange::Known { new_vars_only: true },
+        ))
+    }
+}
+
+impl NamedLibfunc for StructBoxedDeconstructLibfunc {
+    type Concrete = ConcreteStructBoxedDeconstructLibfunc;
+    const STR_ID: &'static str = "struct_boxed_deconstruct";
+
+    fn specialize_signature(
+        &self,
+        context: &dyn SignatureSpecializationContext,
+        args: &[GenericArg],
+    ) -> Result<LibfuncSignature, SpecializationError> {
+        let ty = args_as_single_type(args)?;
+        let (member_types, is_snapshot) = Self::analyze_struct_type(context, ty)?;
+        Self::create_signature(context, ty.clone(), member_types.into_iter(), is_snapshot)
+    }
+
+    fn specialize(
+        &self,
+        context: &dyn SpecializationContext,
+        args: &[GenericArg],
+    ) -> Result<Self::Concrete, SpecializationError> {
+        let ty = args_as_single_type(args)?;
+        let (members, is_snapshot) = Self::analyze_struct_type(context, ty)?;
+        let signature =
+            Self::create_signature(context, ty.clone(), members.iter().cloned(), is_snapshot)?;
+        Ok(ConcreteStructBoxedDeconstructLibfunc { members, signature })
     }
 }

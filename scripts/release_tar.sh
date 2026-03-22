@@ -2,7 +2,7 @@
 
 set -ex
 
-NAMES="cairo-compile cairo-format cairo-language-server cairo-run cairo-test sierra-compile starknet-compile starknet-sierra-compile"
+NAMES="cairo-compile cairo-format cairo-run cairo-execute cairo-test sierra-compile starknet-compile starknet-sierra-compile"
 TARGET=$1
 rustup target add $TARGET
 cargo build --release --target $TARGET
@@ -12,8 +12,7 @@ mkdir -p target/$TARGET/cairo
 (
     cd target/$TARGET
     mkdir cairo/bin
-    for NAME in $NAMES
-    do
+    for NAME in $NAMES; do
         cp release/$NAME cairo/bin/
     done
     cp -R ../../corelib cairo/

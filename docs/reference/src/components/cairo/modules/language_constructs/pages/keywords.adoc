@@ -6,6 +6,7 @@ There are three keyword categories:
 - xref:keywords.adoc#reserved_keywords[reserved]
 - xref:keywords.adoc#contextual_keywords[contextual]
 
+[[strict_keywords]]
 == Strict keywords
 
 These keywords can only be used in their correct contexts.
@@ -13,28 +14,37 @@ They cannot be used as names of any items.
 
 [source]
 ----
+as
 break
 const
 continue
 else
 enum
+extern
 false
-for
 fn
-hint
 if
 impl
-in
+implicits
+let
+loop
 match
+mod
+mut
+nopanic
+of
 pub
+ref
 return
 struct
 trait
 true
 type
 use
+while
 ----
 
+[[reserved_keywords]]
 == Reserved keywords
 
 These keywords aren't used yet, but they are reserved for future use.
@@ -44,30 +54,28 @@ Cairo by forbidding them to use these keywords.
 
 [source]
 ----
-as
+Self
 assert
 do
 dyn
-extern
-let
+for
+hint
+in
 macro
-mod
 move
-ref
-Self
 self
-static_assert
 static
+static_assert
 super
 try
 typeof
 unsafe
 where
-while
 with
 yield
 ----
 
+[[contextual_keywords]]
 == Contextual keywords
 
 Some grammar productions may make use of new keywords not listed here.
@@ -78,5 +86,5 @@ possible to declare a function or variable with such names.
 
 [NOTE]
 ====
-No contextual keywords are in use as for now.
+No contextual keywords are in use for now.
 ====

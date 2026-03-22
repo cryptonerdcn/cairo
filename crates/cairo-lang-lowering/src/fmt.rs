@@ -1,32 +1,40 @@
 use cairo_lang_debug::DebugWithDb;
-use cairo_lang_semantic::ConcreteVariant;
-use id_arena::Arena;
+use cairo_lang_debug::debug::DebugWithDbOverride;
+use cairo_lang_defs::ids::NamedLanguageElementId;
+use itertools::Itertools;
+use salsa::Database;
 
-use crate::db::LoweringGroup;
 use crate::objects::{
-    BlockId, MatchExternInfo, Statement, StatementCall, StatementLiteral,
-    StatementStructDestructure, VariableId,
+    MatchExternInfo, Statement, StatementCall, StatementConst, StatementIntoBox,
+    StatementStructDestructure, StatementUnbox, VariableId,
 };
 use crate::{
-    FlatBlock, FlatBlockEnd, FlatLowered, MatchArm, MatchEnumInfo, MatchInfo, StatementDesnap,
-    StatementEnumConstruct, StatementSnapshot, StatementStructConstruct, VarRemapping, Variable,
+    Block, BlockEnd, Lowered, MatchArm, MatchEnumInfo, MatchEnumValue, MatchInfo, StatementDesnap,
+    StatementEnumConstruct, StatementSnapshot, StatementStructConstruct, VarRemapping, VarUsage,
+    VariableArena,
 };
 
 /// Holds all the information needed for formatting lowered representations.
 /// Acts like a "db" for DebugWithDb.
 pub struct LoweredFormatter<'db> {
-    pub db: &'db dyn LoweringGroup,
-    pub variables: &'db Arena<Variable>,
+    pub db: &'db dyn Database,
+    pub variables: &'db VariableArena<'db>,
+    pub include_usage_location: bool,
+}
+impl<'db> LoweredFormatter<'db> {
+    pub fn new(db: &'db dyn Database, variables: &'db VariableArena<'db>) -> Self {
+        Self { db, variables, include_usage_location: false }
+    }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for VarRemapping {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for VarRemapping<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, _ctx: &Self::Db) -> std::fmt::Result {
         let mut remapping = self.iter().peekable();
         write!(f, "{{")?;
         while let Some((dst, src)) = remapping.next() {
-            src.fmt(f, ctx)?;
-            write!(f, " -> ")?;
-            dst.fmt(f, ctx)?;
+            write!(f, "v{:?} -> v{:?}", src.var_id.index(), dst.index())?;
             if remapping.peek().is_some() {
                 write!(f, ", ")?;
             }
@@ -35,8 +43,10 @@ impl DebugWithDb<LoweredFormatter<'_>> for VarRemapping {
         Ok(())
     }
 }
-impl DebugWithDb<LoweredFormatter<'_>> for FlatLowered {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for Lowered<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         write!(f, "Parameters:")?;
         let mut inputs = self.parameters.iter().peekable();
         while let Some(var) = inputs.next() {
@@ -49,13 +59,13 @@ impl DebugWithDb<LoweredFormatter<'_>> for FlatLowered {
         writeln!(f)?;
         let mut blocks = self.blocks.iter();
         if let Some((root_block_id, root_block)) = blocks.next() {
-            root_block_id.fmt(f, ctx)?;
+            write!(f, "{root_block_id:?}")?;
             writeln!(f, " (root):")?;
             root_block.fmt(f, ctx)?;
             writeln!(f)?;
         }
         for (block_id, block) in blocks {
-            block_id.fmt(f, ctx)?;
+            write!(f, "{block_id:?}")?;
             writeln!(f, ":")?;
             block.fmt(f, ctx)?;
             writeln!(f)?;
@@ -64,8 +74,10 @@ impl DebugWithDb<LoweredFormatter<'_>> for FlatLowered {
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for FlatBlock {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for Block<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         writeln!(f, "Statements:")?;
         for stmt in &self.statements {
             write!(f, "  ")?;
@@ -79,33 +91,31 @@ impl DebugWithDb<LoweredFormatter<'_>> for FlatBlock {
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for FlatBlockEnd {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
-        let outputs = match &self {
-            FlatBlockEnd::Return(returns) => {
+impl<'db> DebugWithDb<'db> for BlockEnd<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        match &self {
+            BlockEnd::Return(returns, _location) => {
                 write!(f, "  Return(")?;
-                returns.clone()
+                let mut it = returns.iter().peekable();
+                while let Some(var_usage) = it.next() {
+                    write!(f, "v{:?}", var_usage.var_id.index())?;
+                    if it.peek().is_some() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, ")")
             }
-            FlatBlockEnd::Panic(data) => {
-                write!(f, "  Panic(")?;
-                vec![*data]
+            BlockEnd::Panic(data) => {
+                write!(f, "  Panic(v{:?})", data.var_id.index())
             }
-            FlatBlockEnd::Goto(block_id, remapping) => {
-                return write!(f, "  Goto({:?}, {:?})", block_id.debug(ctx), remapping.debug(ctx));
+            BlockEnd::Goto(block_id, remapping) => {
+                write!(f, "  Goto({block_id:?}, {:?})", remapping.debug(ctx))
             }
-            FlatBlockEnd::NotSet => unreachable!(),
-            FlatBlockEnd::Match { info } => {
-                return write!(f, "  Match({:?})", info.debug(ctx));
-            }
-        };
-        let mut outputs = outputs.iter().peekable();
-        while let Some(var) = outputs.next() {
-            var.fmt(f, ctx)?;
-            if outputs.peek().is_some() {
-                write!(f, ", ")?;
-            }
+            BlockEnd::NotSet => write!(f, "  Not set"),
+            BlockEnd::Match { info } => write!(f, "  Match({:?})", info.debug(ctx)),
         }
-        write!(f, ")")
     }
 }
 
@@ -114,80 +124,108 @@ fn format_var_with_ty(
     f: &mut std::fmt::Formatter<'_>,
     ctx: &LoweredFormatter<'_>,
 ) -> std::fmt::Result {
-    var_id.fmt(f, ctx)?;
+    write!(f, "v{:?}", var_id.index())?;
     let var = &ctx.variables[var_id];
-    write!(f, ": {}", var.ty.format(ctx.db.upcast()))
+    write!(f, ": {}", var.ty.format(ctx.db))
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for BlockId {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-        _lowered: &LoweredFormatter<'_>,
-    ) -> std::fmt::Result {
-        write!(f, "blk{:?}", self.0)
+impl<'db> DebugWithDb<'db> for VarUsage<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        write!(f, "v{:?}", self.var_id.index(),)?;
+        if ctx.include_usage_location {
+            write!(
+                f,
+                "{{`{}`}}",
+                self.location
+                    .long(ctx.db)
+                    .stable_location
+                    .syntax_node(ctx.db)
+                    .get_text_without_trivia(ctx.db)
+                    .long(ctx.db)
+                    .lines()
+                    .map(|s| s.trim())
+                    .join(" ")
+            )?;
+        }
+        Ok(())
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for VariableId {
-    fn fmt(
+impl<'db> DebugWithDbOverride<'db, LoweredFormatter<'db>> for VariableId {
+    fn fmt_override(
         &self,
         f: &mut std::fmt::Formatter<'_>,
-        _lowered: &LoweredFormatter<'_>,
+        _db: &'db LoweredFormatter<'db>,
     ) -> std::fmt::Result {
         write!(f, "v{:?}", self.index())
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for Statement {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for Statement<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         write!(f, "(")?;
-        let mut outputs = self.outputs().into_iter().peekable();
+        let mut outputs = self.outputs().iter().peekable();
         while let Some(var) = outputs.next() {
-            format_var_with_ty(var, f, ctx)?;
+            format_var_with_ty(*var, f, ctx)?;
             if outputs.peek().is_some() {
                 write!(f, ", ")?;
             }
         }
         write!(f, ") <- ")?;
         match self {
-            Statement::Literal(stmt) => stmt.fmt(f, ctx),
+            Statement::Const(stmt) => stmt.fmt(f, ctx),
             Statement::Call(stmt) => stmt.fmt(f, ctx),
             Statement::StructConstruct(stmt) => stmt.fmt(f, ctx),
             Statement::StructDestructure(stmt) => stmt.fmt(f, ctx),
             Statement::EnumConstruct(stmt) => stmt.fmt(f, ctx),
             Statement::Snapshot(stmt) => stmt.fmt(f, ctx),
             Statement::Desnap(stmt) => stmt.fmt(f, ctx),
+            Statement::IntoBox(stmt) => stmt.fmt(f, ctx),
+            Statement::Unbox(stmt) => stmt.fmt(f, ctx),
         }
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for MatchInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for MatchInfo<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         match self {
             MatchInfo::Extern(s) => s.fmt(f, ctx),
             MatchInfo::Enum(s) => s.fmt(f, ctx),
+            MatchInfo::Value(s) => s.fmt(f, ctx),
         }
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for StatementLiteral {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-        _ctx: &LoweredFormatter<'_>,
-    ) -> std::fmt::Result {
-        write!(f, "{}u", self.value)
+impl<'db> DebugWithDb<'db> for StatementConst<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        self.value.fmt(f, ctx.db)?;
+        if self.boxed {
+            write!(f, ".into_box()")?
+        }
+        Ok(())
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for StatementCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}(", self.function.lookup(ctx.db).debug(ctx.db))?;
-        let mut inputs = self.inputs.iter().peekable();
-        while let Some(var) = inputs.next() {
+impl<'db> DebugWithDb<'db> for StatementCall<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        write!(f, "{:?}(", self.function.long(ctx.db).debug(ctx.db))?;
+        for (i, var) in self.inputs.iter().enumerate() {
+            let is_last = i == self.inputs.len() - 1;
+            if is_last && self.with_coupon {
+                write!(f, "__coupon__: ")?;
+            }
             var.fmt(f, ctx)?;
-            if inputs.peek().is_some() {
+            if !is_last {
                 write!(f, ", ")?;
             }
         }
@@ -195,9 +233,11 @@ impl DebugWithDb<LoweredFormatter<'_>> for StatementCall {
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for MatchExternInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
-        write!(f, "match {:?}(", self.function.lookup(ctx.db).debug(ctx.db))?;
+impl<'db> DebugWithDb<'db> for MatchExternInfo<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        write!(f, "match {:?}(", self.function.long(ctx.db).debug(ctx.db))?;
         let mut inputs = self.inputs.iter().peekable();
         while let Some(var) = inputs.next() {
             var.fmt(f, ctx)?;
@@ -214,23 +254,17 @@ impl DebugWithDb<LoweredFormatter<'_>> for MatchExternInfo {
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for ConcreteVariant {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
-        let enum_name = self.concrete_enum_id.enum_id(ctx.db.upcast()).name(ctx.db.upcast());
-        let variant_name = self.id.name(ctx.db.upcast());
-        write!(f, "{enum_name}::{variant_name}")
-    }
-}
+impl<'db> DebugWithDb<'db> for MatchArm<'db> {
+    type Db = LoweredFormatter<'db>;
 
-impl DebugWithDb<LoweredFormatter<'_>> for MatchArm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
-        write!(f, "    {:?}", self.variant_id.debug(ctx))?;
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        write!(f, "    {:?}", self.arm_selector.debug(ctx.db))?;
 
         if !self.var_ids.is_empty() {
             write!(f, "(")?;
             let mut var_ids = self.var_ids.iter().peekable();
             while let Some(var_id) = var_ids.next() {
-                var_id.fmt(f, ctx)?;
+                write!(f, "v{:?}", var_id.index())?;
                 if var_ids.peek().is_some() {
                     write!(f, ", ")?;
                 }
@@ -238,12 +272,14 @@ impl DebugWithDb<LoweredFormatter<'_>> for MatchArm {
             write!(f, ")")?;
         }
 
-        write!(f, " => {:?},", self.block_id.debug(ctx))
+        write!(f, " => {:?},", self.block_id)
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for MatchEnumInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for MatchEnumInfo<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         write!(f, "match_enum(")?;
         self.input.fmt(f, ctx)?;
         writeln!(f, ") {{")?;
@@ -255,19 +291,37 @@ impl DebugWithDb<LoweredFormatter<'_>> for MatchEnumInfo {
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for StatementEnumConstruct {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
-        let enum_name =
-            self.variant.concrete_enum_id.enum_id(ctx.db.upcast()).name(ctx.db.upcast());
-        let variant_name = self.variant.id.name(ctx.db.upcast());
+impl<'db> DebugWithDb<'db> for MatchEnumValue<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        write!(f, "match_enum.(")?;
+        self.input.fmt(f, ctx)?;
+        writeln!(f, ") {{")?;
+        for arm in &self.arms {
+            arm.fmt(f, ctx)?;
+            writeln!(f)?;
+        }
+        write!(f, "  }}")
+    }
+}
+
+impl<'db> DebugWithDb<'db> for StatementEnumConstruct<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        let enum_name = self.variant.concrete_enum_id.enum_id(ctx.db).name(ctx.db).long(ctx.db);
+        let variant_name = self.variant.id.name(ctx.db).long(ctx.db);
         write!(f, "{enum_name}::{variant_name}(",)?;
         self.input.fmt(f, ctx)?;
         write!(f, ")")
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for StatementStructConstruct {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for StatementStructConstruct<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         write!(f, "struct_construct(")?;
         let mut inputs = self.inputs.iter().peekable();
         while let Some(var) = inputs.next() {
@@ -280,25 +334,51 @@ impl DebugWithDb<LoweredFormatter<'_>> for StatementStructConstruct {
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for StatementStructDestructure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for StatementStructDestructure<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         write!(f, "struct_destructure(")?;
         self.input.fmt(f, ctx)?;
         write!(f, ")")
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for StatementSnapshot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for StatementSnapshot<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         write!(f, "snapshot(")?;
         self.input.fmt(f, ctx)?;
         write!(f, ")")
     }
 }
 
-impl DebugWithDb<LoweredFormatter<'_>> for StatementDesnap {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
+impl<'db> DebugWithDb<'db> for StatementDesnap<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
         write!(f, "desnap(")?;
+        self.input.fmt(f, ctx)?;
+        write!(f, ")")
+    }
+}
+
+impl<'db> DebugWithDb<'db> for StatementIntoBox<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        write!(f, "into_box(")?;
+        self.input.fmt(f, ctx)?;
+        write!(f, ")")
+    }
+}
+
+impl<'db> DebugWithDb<'db> for StatementUnbox<'db> {
+    type Db = LoweredFormatter<'db>;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &Self::Db) -> std::fmt::Result {
+        write!(f, "unbox(")?;
         self.input.fmt(f, ctx)?;
         write!(f, ")")
     }

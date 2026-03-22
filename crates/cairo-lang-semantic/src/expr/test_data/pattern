@@ -1,33 +1,28 @@
 //! > pattern type for a param.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
-fn foo(x: (felt252, felt252)) {
-}
+//! > function_code
+fn foo(x: (felt252, felt252)) {}
 
 //! > function_name
 foo
-
-//! > module_code
 
 //! > expected_diagnostics
 
 //! > ==========================================================================
 
-//! > Destructure a struct.
+//! > Valid destructures of a struct.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(s2: Struct2) {
-    let Struct2{member1, member2, member3} = s2;
-    let Struct2{member1, member2} = s2;
-    let Struct2{member1, member2, ..} = s2;
-    let Struct2{member1, member2, member3: Struct1{member1: a,..}} = s2;
-    let Struct2{member1, member2, member3, member1, } = s2;
+    let Struct2 { member1: _, member2: _, member3: _ } = s2;
+    let Struct2 { member1: _, member2: _, .. } = s2;
+    let Struct2 { member1: _, member2: _, member3: Struct1 { member1: _a, .. } } = s2;
 }
 
 //! > function_name
@@ -45,12 +40,276 @@ struct Struct2 {
 }
 
 //! > expected_diagnostics
-error: Missing member "member3".
- --> lib.cairo:12:9
-    let Struct2{member1, member2} = s2;
-        ^***********************^
 
-error: Redefinition of member "member1" on struct "test::Struct2".
- --> lib.cairo:15:9
-    let Struct2{member1, member2, member3, member1, } = s2;
-        ^*******************************************^
+//! > ==========================================================================
+
+//! > Test struct pattern with missing members.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: MyStruct) {
+    let MyStruct { a: _ } = s;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+struct MyStruct {
+    a: usize,
+    b: usize,
+}
+
+//! > expected_diagnostics
+error[E0003]: Missing member "b".
+ --> lib.cairo:6:9
+    let MyStruct { a: _ } = s;
+        ^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test struct pattern with non existing members.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: MyStruct) {
+    let MyStruct { a, b } = s;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+struct MyStruct {}
+
+//! > expected_diagnostics
+error[E2058]: Struct "MyStruct" has no member "a"
+ --> lib.cairo:3:20
+    let MyStruct { a, b } = s;
+                   ^
+
+error[E2058]: Struct "MyStruct" has no member "b"
+ --> lib.cairo:3:23
+    let MyStruct { a, b } = s;
+                      ^
+
+//! > ==========================================================================
+
+//! > Test struct pattern with members redefinition.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: MyStruct) {
+    let MyStruct { a: _, b: _, a: _, b: _ } = s;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+struct MyStruct {
+    a: usize,
+    b: usize,
+}
+
+//! > expected_diagnostics
+error[E2050]: Redefinition of member "a" on struct "MyStruct".
+ --> lib.cairo:6:32
+    let MyStruct { a: _, b: _, a: _, b: _ } = s;
+                               ^
+
+error[E2050]: Redefinition of member "b" on struct "MyStruct".
+ --> lib.cairo:6:38
+    let MyStruct { a: _, b: _, a: _, b: _ } = s;
+                                     ^
+
+//! > ==========================================================================
+
+//! > Test struct pattern with non existing members, members redefinition and missing members.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: MyStruct) {
+    let MyStruct { a: _, c: _, a: _ } = s;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+struct MyStruct {
+    a: usize,
+    b: usize,
+}
+
+//! > expected_diagnostics
+error[E2058]: Struct "MyStruct" has no member "c"
+ --> lib.cairo:6:26
+    let MyStruct { a: _, c: _, a: _ } = s;
+                         ^
+
+error[E2050]: Redefinition of member "a" on struct "MyStruct".
+ --> lib.cairo:6:32
+    let MyStruct { a: _, c: _, a: _ } = s;
+                               ^
+
+error[E0003]: Missing member "b".
+ --> lib.cairo:6:9
+    let MyStruct { a: _, c: _, a: _ } = s;
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test fixed size array pattern incompatible number of elements.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: [felt252; 3]) {
+    let [_a, _b] = s;
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2108]: Wrong number of fixed size array elements in pattern. Expected: 3. Got: 2.
+ --> lib.cairo:2:9
+    let [_a, _b] = s;
+        ^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test tuple assigned to a fixed size array pattern.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: (felt252, felt252, felt252)) {
+    let [_a, _b, _c] = s;
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2106]: Unexpected type for fixed size array pattern. "(core::felt252, core::felt252, core::felt252)" is not a fixed size array.
+ --> lib.cairo:2:9
+    let [_a, _b, _c] = s;
+        ^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test fixed size array assigned to a tuple pattern.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: [felt252; 3]) {
+    let (_a, _b, _c) = s;
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2105]: Unexpected type for tuple pattern. "[core::felt252; 3]" is not a tuple.
+ --> lib.cairo:2:9
+    let (_a, _b, _c) = s;
+        ^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Avoid crash on unknown patterns.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(s: [felt252; 3]) {
+    let (unresolved,) = if true {} else {
+        (array![(1, 2, 3)],)
+    };
+    for (_x, _y, _z) in unresolved.span() {}
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2056]: If blocks have incompatible types: "()" and "(core::array::Array::<(?3, ?4, ?5)>,)"
+ --> lib.cairo:2:25-4:5
+      let (unresolved,) = if true {} else {
+ _________________________^
+|         (array![(1, 2, 3)],)
+|     };
+|_____^
+
+error[E2107]: Wrong number of tuple elements in pattern. Expected: 0. Got: 1.
+ --> lib.cairo:2:9
+    let (unresolved,) = if true {} else {
+        ^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test duplicate variables in tuple pattern let.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    let (_a, _a) = (1, 2);
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2049]: Redefinition of variable name "_a" in pattern.
+ --> lib.cairo:2:14
+    let (_a, _a) = (1, 2);
+             ^^
+
+//! > ==========================================================================
+
+//! > Test duplicate variables in match patterns.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    match (1, 2) {
+        (_a, _a) => (),
+    }
+
+    match ((1, 2), 3) {
+        ((_b, _), _b) => (),
+    };
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2049]: Redefinition of variable name "_a" in pattern.
+ --> lib.cairo:3:14
+        (_a, _a) => (),
+             ^^
+
+error[E2049]: Redefinition of variable name "_b" in pattern.
+ --> lib.cairo:7:19
+        ((_b, _), _b) => (),
+                  ^^

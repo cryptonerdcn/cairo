@@ -1,0 +1,2091 @@
+//! > runtime costs handle each postcost component separately
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+fn foo(x: felt252) {
+    if x == 0 {
+        holes(x);
+    } else {
+        use_rc();
+    }
+}
+
+#[inline(never)]
+fn holes(x: felt252) {
+    if x == 0 {
+        1 + 2 + 3 + 4 + 5;
+    }
+}
+
+#[inline(never)]
+fn use_rc() {
+    1_u32 < two();
+}
+
+#[inline(never)]
+fn two() -> u32 {
+    2
+}
+
+//! > gas_solution_lp
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 250, Step: 2, Hole: 0, RangeCheck: 1})
+#10: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 5, RangeCheck: 0})
+#20: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 4, RangeCheck: 0})
+#36: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 260, Step: 3, Hole: 0, RangeCheck: 0})
+#43: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 90, Step: 1, Hole: 0, RangeCheck: 0})
+#47: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 1, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 1570, Step: 15, Hole: 6, RangeCheck: 1})
+test::holes: SmallOrderedMap({Const: 600, Step: 6, Hole: 4, RangeCheck: 0})
+test::use_rc: SmallOrderedMap({Const: 1070, Step: 10, Hole: 1, RangeCheck: 1})
+test::two: SmallOrderedMap({Const: 100, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 250, Step: 2, Hole: 0, RangeCheck: 1})
+#10: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 5, RangeCheck: 0})
+#20: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 4, RangeCheck: 0})
+#36: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 260, Step: 3, Hole: 0, RangeCheck: 0})
+#43: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 90, Step: 1, Hole: 0, RangeCheck: 0})
+#47: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 1, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 1570, Step: 15, Hole: 6, RangeCheck: 1})
+test::holes: SmallOrderedMap({Const: 600, Step: 6, Hole: 4, RangeCheck: 0})
+test::use_rc: SmallOrderedMap({Const: 1070, Step: 10, Hole: 1, RangeCheck: 1})
+test::two: SmallOrderedMap({Const: 100, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+#5: 2
+#36: 4
+#43: 1
+
+test::holes: 5
+test::foo: 12
+test::use_rc: 8
+test::two: 1
+
+//! > ap_solution_linear
+#5: 2
+#36: 4
+#43: 1
+
+test::foo: 12
+test::holes: 5
+test::use_rc: 8
+test::two: 1
+
+//! > sierra_code
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<u32, 2> = Const<u32, 2> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<u32, 1> = Const<u32, 1> [storable: false, drop: false, dup: false, zero_sized: false];
+type u32 = u32 [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 5> = Const<felt252, 5> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 4> = Const<felt252, 4> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 3> = Const<felt252, 3> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 2> = Const<felt252, 2> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 1> = Const<felt252, 1> [storable: false, drop: false, dup: false, zero_sized: false];
+type RangeCheck = RangeCheck [storable: true, drop: false, dup: false, zero_sized: false];
+type NonZero<felt252> = NonZero<felt252> [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 0> = Const<felt252, 0> [storable: false, drop: false, dup: false, zero_sized: false];
+
+libfunc const_as_immediate<Const<felt252, 0>> = const_as_immediate<Const<felt252, 0>>;
+libfunc dup<felt252> = dup<felt252>;
+libfunc felt252_sub = felt252_sub;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc felt252_is_zero = felt252_is_zero;
+libfunc branch_align = branch_align;
+libfunc function_call<user@test::holes> = function_call<user@test::holes>;
+libfunc store_temp<RangeCheck> = store_temp<RangeCheck>;
+libfunc drop<NonZero<felt252>> = drop<NonZero<felt252>>;
+libfunc drop<felt252> = drop<felt252>;
+libfunc function_call<user@test::use_rc> = function_call<user@test::use_rc>;
+libfunc const_as_immediate<Const<felt252, 1>> = const_as_immediate<Const<felt252, 1>>;
+libfunc const_as_immediate<Const<felt252, 2>> = const_as_immediate<Const<felt252, 2>>;
+libfunc felt252_add = felt252_add;
+libfunc const_as_immediate<Const<felt252, 3>> = const_as_immediate<Const<felt252, 3>>;
+libfunc const_as_immediate<Const<felt252, 4>> = const_as_immediate<Const<felt252, 4>>;
+libfunc const_as_immediate<Const<felt252, 5>> = const_as_immediate<Const<felt252, 5>>;
+libfunc function_call<user@test::two> = function_call<user@test::two>;
+libfunc const_as_immediate<Const<u32, 1>> = const_as_immediate<Const<u32, 1>>;
+libfunc store_temp<u32> = store_temp<u32>;
+libfunc u32_overflowing_sub = u32_overflowing_sub;
+libfunc drop<u32> = drop<u32>;
+libfunc const_as_immediate<Const<u32, 2>> = const_as_immediate<Const<u32, 2>>;
+
+F0:
+const_as_immediate<Const<felt252, 0>>() -> ([2]);
+dup<felt252>([1]) -> ([1], [3]);
+felt252_sub([3], [2]) -> ([4]);
+store_temp<felt252>([4]) -> ([4]);
+felt252_is_zero([4]) { fallthrough() F0_B0([5]) };
+branch_align() -> ();
+store_temp<felt252>([1]) -> ([1]);
+function_call<user@test::holes>([1]) -> ();
+store_temp<RangeCheck>([0]) -> ([0]);
+return([0]);
+F0_B0:
+branch_align() -> ();
+drop<NonZero<felt252>>([5]) -> ();
+drop<felt252>([1]) -> ();
+store_temp<RangeCheck>([0]) -> ([0]);
+function_call<user@test::use_rc>([0]) -> ([6]);
+return([6]);
+F1:
+const_as_immediate<Const<felt252, 0>>() -> ([1]);
+felt252_sub([0], [1]) -> ([2]);
+store_temp<felt252>([2]) -> ([2]);
+felt252_is_zero([2]) { fallthrough() F1_B0([3]) };
+branch_align() -> ();
+const_as_immediate<Const<felt252, 1>>() -> ([4]);
+const_as_immediate<Const<felt252, 2>>() -> ([5]);
+store_temp<felt252>([4]) -> ([4]);
+felt252_add([4], [5]) -> ([6]);
+const_as_immediate<Const<felt252, 3>>() -> ([7]);
+store_temp<felt252>([6]) -> ([6]);
+felt252_add([6], [7]) -> ([8]);
+const_as_immediate<Const<felt252, 4>>() -> ([9]);
+store_temp<felt252>([8]) -> ([8]);
+felt252_add([8], [9]) -> ([10]);
+const_as_immediate<Const<felt252, 5>>() -> ([11]);
+store_temp<felt252>([10]) -> ([10]);
+felt252_add([10], [11]) -> ([12]);
+drop<felt252>([12]) -> ();
+return();
+F1_B0:
+branch_align() -> ();
+drop<NonZero<felt252>>([3]) -> ();
+return();
+F2:
+function_call<user@test::two>() -> ([1]);
+const_as_immediate<Const<u32, 1>>() -> ([2]);
+store_temp<u32>([2]) -> ([2]);
+u32_overflowing_sub([0], [2], [1]) { fallthrough([3], [4]) F2_B0([5], [6]) };
+branch_align() -> ();
+drop<u32>([4]) -> ();
+store_temp<RangeCheck>([3]) -> ([3]);
+return([3]);
+F2_B0:
+branch_align() -> ();
+drop<u32>([6]) -> ();
+store_temp<RangeCheck>([5]) -> ([5]);
+return([5]);
+F3:
+const_as_immediate<Const<u32, 2>>() -> ([0]);
+store_temp<u32>([0]) -> ([0]);
+return([0]);
+
+test::foo@F0([0]: RangeCheck, [1]: felt252) -> (RangeCheck);
+test::holes@F1([0]: felt252) -> ();
+test::use_rc@F2([0]: RangeCheck) -> (RangeCheck);
+test::two@F3() -> (u32);
+
+//! > casm
+[fp + -3] = [ap + 0] + 0, ap++;
+jmp rel 9 if [ap + -1] != 0;
+ap += 2;
+[ap + 0] = [fp + -3], ap++;
+call rel 8;
+[ap + 0] = [fp + -4], ap++;
+ret;
+[ap + 0] = [fp + -4], ap++;
+call rel 19;
+ret;
+[fp + -3] = [ap + 0] + 0, ap++;
+jmp rel 11 if [ap + -1] != 0;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 2, ap++;
+[ap + 0] = [ap + -1] + 3, ap++;
+[ap + 0] = [ap + -1] + 4, ap++;
+ret;
+ap += 4;
+ret;
+call rel 21;
+[ap + 0] = 1, ap++;
+[ap + -1] = [ap + 1] + [ap + -2], ap++;
+%{ memory[ap + -1] = memory[ap + 0] < 4294967296 %}
+jmp rel 7 if [ap + -1] != 0, ap++;
+[ap + 0] = [ap + -1] + 340282366920938463463374607431768211456, ap++;
+[ap + -1] = [[fp + -3] + 0];
+jmp rel 8;
+[ap + -1] = [[fp + -3] + 0];
+ap += 1;
+[ap + 0] = [fp + -3] + 1, ap++;
+ret;
+[ap + 0] = [fp + -3] + 1, ap++;
+ret;
+[ap + 0] = 2, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > branch_align values are pushed to the end
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+fn foo(x: felt252) {
+    // The branch_align of the external if statements should have zero value, since the value should
+    // be pushed to the inner if statement.
+    if x == 0 {
+        if x == 1 {
+            if x == 2 {
+                bar();
+            } else {
+                bar();
+            }
+        } else {
+            bar();
+            bar();
+        }
+    } else {
+        bar();
+        bar();
+        bar();
+    }
+}
+
+#[inline(never)]
+fn bar() {
+    core::gas::redeposit_gas()
+}
+
+//! > enforced_costs
+test::bar 10000
+
+//! > gas_solution_lp
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9880, Step: 0, Hole: 0, RangeCheck: 0})
+#11: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9780, Step: 0, Hole: 0, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#18: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 100, Step: 1, Hole: 0, RangeCheck: 0})
+#23: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 1, Hole: 2, RangeCheck: 0})
+#30: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 1, Hole: 4, RangeCheck: 0})
+#38: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 30900, Step: 13, Hole: 4, RangeCheck: 0})
+test::bar: SmallOrderedMap({Const: 10000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#11: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 19660, Step: 0, Hole: 0, RangeCheck: 0})
+#18: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 19760, Step: 1, Hole: 0, RangeCheck: 0})
+#23: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9880, Step: 1, Hole: 2, RangeCheck: 0})
+#30: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 1, Hole: 4, RangeCheck: 0})
+#38: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 30900, Step: 13, Hole: 4, RangeCheck: 0})
+test::bar: SmallOrderedMap({Const: 10000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+#5: 2
+#11: 2
+
+test::bar: 1
+test::foo: 11
+
+//! > ap_solution_linear
+#5: 2
+#11: 2
+
+test::foo: 11
+test::bar: 1
+
+//! > sierra_code
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 2> = Const<felt252, 2> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 1> = Const<felt252, 1> [storable: false, drop: false, dup: false, zero_sized: false];
+type NonZero<felt252> = NonZero<felt252> [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 0> = Const<felt252, 0> [storable: false, drop: false, dup: false, zero_sized: false];
+
+libfunc const_as_immediate<Const<felt252, 0>> = const_as_immediate<Const<felt252, 0>>;
+libfunc dup<felt252> = dup<felt252>;
+libfunc felt252_sub = felt252_sub;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc felt252_is_zero = felt252_is_zero;
+libfunc branch_align = branch_align;
+libfunc const_as_immediate<Const<felt252, 1>> = const_as_immediate<Const<felt252, 1>>;
+libfunc const_as_immediate<Const<felt252, 2>> = const_as_immediate<Const<felt252, 2>>;
+libfunc jump = jump;
+libfunc drop<NonZero<felt252>> = drop<NonZero<felt252>>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc function_call<user@test::bar> = function_call<user@test::bar>;
+libfunc drop<felt252> = drop<felt252>;
+libfunc redeposit_gas = redeposit_gas;
+
+F0:
+const_as_immediate<Const<felt252, 0>>() -> ([2]);
+dup<felt252>([1]) -> ([1], [3]);
+felt252_sub([3], [2]) -> ([4]);
+store_temp<felt252>([4]) -> ([4]);
+felt252_is_zero([4]) { fallthrough() F0_B3([5]) };
+branch_align() -> ();
+const_as_immediate<Const<felt252, 1>>() -> ([6]);
+dup<felt252>([1]) -> ([1], [7]);
+felt252_sub([7], [6]) -> ([8]);
+store_temp<felt252>([8]) -> ([8]);
+felt252_is_zero([8]) { fallthrough() F0_B2([9]) };
+branch_align() -> ();
+const_as_immediate<Const<felt252, 2>>() -> ([10]);
+felt252_sub([1], [10]) -> ([11]);
+store_temp<felt252>([11]) -> ([11]);
+felt252_is_zero([11]) { fallthrough() F0_B0([12]) };
+branch_align() -> ();
+jump() { F0_B1() };
+F0_B0:
+branch_align() -> ();
+drop<NonZero<felt252>>([12]) -> ();
+F0_B1:
+store_temp<GasBuiltin>([0]) -> ([0]);
+function_call<user@test::bar>([0]) -> ([13]);
+return([13]);
+F0_B2:
+branch_align() -> ();
+drop<NonZero<felt252>>([9]) -> ();
+drop<felt252>([1]) -> ();
+store_temp<GasBuiltin>([0]) -> ([0]);
+function_call<user@test::bar>([0]) -> ([14]);
+function_call<user@test::bar>([14]) -> ([15]);
+return([15]);
+F0_B3:
+branch_align() -> ();
+drop<NonZero<felt252>>([5]) -> ();
+drop<felt252>([1]) -> ();
+store_temp<GasBuiltin>([0]) -> ([0]);
+function_call<user@test::bar>([0]) -> ([16]);
+function_call<user@test::bar>([16]) -> ([17]);
+function_call<user@test::bar>([17]) -> ([18]);
+return([18]);
+F1:
+redeposit_gas([0]) -> ([1]);
+store_temp<GasBuiltin>([1]) -> ([1]);
+return([1]);
+
+test::foo@F0([0]: GasBuiltin, [1]: felt252) -> (GasBuiltin);
+test::bar@F1([0]: GasBuiltin) -> (GasBuiltin);
+
+//! > casm
+[fp + -3] = [ap + 0] + 0, ap++;
+jmp rel 26 if [ap + -1] != 0;
+ap += 2;
+[fp + -3] = [ap + 0] + 1, ap++;
+jmp rel 14 if [ap + -1] != 0;
+ap += 2;
+[fp + -3] = [ap + 0] + 2, ap++;
+jmp rel 4 if [ap + -1] != 0;
+jmp rel 2;
+[ap + 0] = [fp + -4], ap++;
+call rel 17;
+ret;
+[ap + 0] = [fp + -4], ap++;
+call rel 13;
+call rel 11;
+ret;
+[ap + 0] = [fp + -4], ap++;
+call rel 7;
+call rel 5;
+call rel 3;
+ret;
+[ap + 0] = [fp + -3] + 9900, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > branch_align of withdraw_gas
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+fn foo(x: felt252) {
+    // In this case, the failing branch is more expensive than the success branch.
+    // The excess created by the external branch_align should be pushed to the next (inner)
+    // statements.
+    match gas::withdraw_gas() {
+        Some(_) => {
+            if x == 0 {
+                // Here we don't need to withdraw gas, since we have excess created by the external
+                // failing branch.
+                match gas::withdraw_gas() {
+                    Some(_) => { bar(); },
+                    None(_) => {},
+                }
+            } else {
+                bar();
+            }
+        },
+        None(_) => {
+            bar();
+            bar();
+        },
+    }
+}
+
+#[inline(never)]
+fn bar() {
+    core::gas::redeposit_gas()
+}
+
+//! > enforced_costs
+test::bar 10000
+
+//! > gas_solution_lp
+#0: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 4, RangeCheck: 1})
+#1: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9640, Step: 0, Hole: 0, RangeCheck: 0})
+#6: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#7: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 2, Hole: 0, RangeCheck: 0})
+#8: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 5, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 10250, Step: 2, Hole: 0, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 350, Step: 1, Hole: 3, RangeCheck: 1})
+#24: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#32: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 21280, Step: 14, Hole: 1, RangeCheck: 1})
+test::bar: SmallOrderedMap({Const: 10000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#0: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 4, RangeCheck: 1})
+#1: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#6: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#7: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 2, Hole: 0, RangeCheck: 0})
+#8: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9640, Step: 0, Hole: 5, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 19890, Step: 2, Hole: 0, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9990, Step: 1, Hole: 3, RangeCheck: 1})
+#24: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#32: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 21280, Step: 14, Hole: 1, RangeCheck: 1})
+test::bar: SmallOrderedMap({Const: 10000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+#12: 5
+#16: 2
+#24: 1
+
+test::foo: 12
+test::bar: 1
+
+//! > ap_solution_linear
+#12: 5
+#16: 2
+#24: 1
+
+test::foo: 12
+test::bar: 1
+
+//! > sierra_code
+type RangeCheck = RangeCheck [storable: true, drop: false, dup: false, zero_sized: false];
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type NonZero<felt252> = NonZero<felt252> [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 0> = Const<felt252, 0> [storable: false, drop: false, dup: false, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+
+libfunc withdraw_gas = withdraw_gas;
+libfunc branch_align = branch_align;
+libfunc const_as_immediate<Const<felt252, 0>> = const_as_immediate<Const<felt252, 0>>;
+libfunc felt252_sub = felt252_sub;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc felt252_is_zero = felt252_is_zero;
+libfunc store_temp<RangeCheck> = store_temp<RangeCheck>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc jump = jump;
+libfunc drop<NonZero<felt252>> = drop<NonZero<felt252>>;
+libfunc function_call<user@test::bar> = function_call<user@test::bar>;
+libfunc drop<felt252> = drop<felt252>;
+libfunc redeposit_gas = redeposit_gas;
+
+F0:
+withdraw_gas([0], [1]) { fallthrough([3], [4]) F0_B3([5], [6]) };
+branch_align() -> ();
+const_as_immediate<Const<felt252, 0>>() -> ([7]);
+felt252_sub([2], [7]) -> ([8]);
+store_temp<felt252>([8]) -> ([8]);
+felt252_is_zero([8]) { fallthrough() F0_B1([9]) };
+branch_align() -> ();
+withdraw_gas([3], [4]) { fallthrough([10], [11]) F0_B0([12], [13]) };
+branch_align() -> ();
+store_temp<RangeCheck>([10]) -> ([14]);
+store_temp<GasBuiltin>([11]) -> ([15]);
+jump() { F0_B2() };
+F0_B0:
+branch_align() -> ();
+store_temp<RangeCheck>([12]) -> ([12]);
+store_temp<GasBuiltin>([13]) -> ([13]);
+return([12], [13]);
+F0_B1:
+branch_align() -> ();
+drop<NonZero<felt252>>([9]) -> ();
+store_temp<RangeCheck>([3]) -> ([14]);
+store_temp<GasBuiltin>([4]) -> ([15]);
+F0_B2:
+function_call<user@test::bar>([15]) -> ([16]);
+store_temp<RangeCheck>([14]) -> ([14]);
+store_temp<GasBuiltin>([16]) -> ([16]);
+return([14], [16]);
+F0_B3:
+branch_align() -> ();
+drop<felt252>([2]) -> ();
+store_temp<GasBuiltin>([6]) -> ([6]);
+function_call<user@test::bar>([6]) -> ([17]);
+function_call<user@test::bar>([17]) -> ([18]);
+store_temp<RangeCheck>([5]) -> ([5]);
+store_temp<GasBuiltin>([18]) -> ([18]);
+return([5], [18]);
+F1:
+redeposit_gas([0]) -> ([1]);
+store_temp<GasBuiltin>([1]) -> ([1]);
+return([1]);
+
+test::foo@F0([0]: RangeCheck, [1]: GasBuiltin, [2]: felt252) -> (RangeCheck, GasBuiltin);
+test::bar@F1([0]: GasBuiltin) -> (GasBuiltin);
+
+//! > casm
+%{ memory[ap + 0] = 0 <= memory[fp + -4] %}
+jmp rel 7 if [ap + 0] != 0, ap++;
+[ap + 0] = [fp + -4] + 340282366920938463463374607431768211456, ap++;
+[ap + -1] = [[fp + -5] + 0];
+jmp rel 40;
+[fp + -4] = [ap + 0] + 0, ap++;
+[ap + -1] = [[fp + -5] + 0];
+[fp + -3] = [ap + 0] + 0, ap++;
+jmp rel 23 if [ap + -1] != 0;
+%{ memory[ap + 0] = 0 <= memory[ap + -2] %}
+jmp rel 7 if [ap + 0] != 0, ap++;
+[ap + 0] = [ap + -3] + 340282366920938463463374607431768211456, ap++;
+[ap + -1] = [[fp + -5] + 1];
+jmp rel 10;
+[ap + -3] = [ap + 0] + 0, ap++;
+[ap + -1] = [[fp + -5] + 1];
+[ap + 0] = [fp + -5] + 2, ap++;
+[ap + 0] = [ap + -2], ap++;
+jmp rel 13;
+ap += 5;
+[ap + 0] = [fp + -5] + 2, ap++;
+[ap + 0] = [ap + -10], ap++;
+ret;
+ap += 2;
+[ap + 0] = [fp + -5] + 1, ap++;
+[ap + 0] = [ap + -5], ap++;
+call rel 16;
+[ap + 0] = [ap + -5], ap++;
+[ap + 0] = [ap + -2], ap++;
+ret;
+ap += 1;
+[ap + 0] = [fp + -4], ap++;
+call rel 8;
+call rel 6;
+[ap + 0] = [fp + -5] + 1, ap++;
+[ap + 0] = [ap + -2], ap++;
+ret;
+[ap + 0] = [fp + -3] + 9900, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > withdraw_gas reduces excess
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+fn foo(x: felt252) {
+    if x == 0 {
+        // Excess is created by the external `else` branch. Therefore, we don't need to withdraw
+        // gas here.
+        match gas::withdraw_gas() {
+            Some(_) => {
+                // Here we have used the excess and we need to withdraw gas.
+                match gas::withdraw_gas() {
+                    Some(_) => { bar(); },
+                    None(_) => {},
+                }
+            },
+            None(_) => {},
+        }
+    } else {
+        bar();
+    }
+}
+
+#[inline(never)]
+fn bar() {
+    core::gas::redeposit_gas();
+}
+
+//! > enforced_costs
+test::bar 2000
+
+//! > gas_solution_lp
+#4: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 2, Hole: 0, RangeCheck: 1})
+#6: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#7: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 700, Step: 4, Hole: 0, RangeCheck: 0})
+#8: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 7, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1550, Step: 0, Hole: 2, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1900, Step: 1, Hole: 0, RangeCheck: 0})
+#20: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 3, RangeCheck: 1})
+#28: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 2940, Step: 10, Hole: 7, RangeCheck: 1})
+test::bar: SmallOrderedMap({Const: 2000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#4: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 2, Hole: 0, RangeCheck: 1})
+#6: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#7: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 700, Step: 4, Hole: 0, RangeCheck: 0})
+#8: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 7, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1550, Step: 0, Hole: 2, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1900, Step: 1, Hole: 0, RangeCheck: 0})
+#20: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 3, RangeCheck: 1})
+#28: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 2940, Step: 10, Hole: 7, RangeCheck: 1})
+test::bar: SmallOrderedMap({Const: 2000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+#12: 5
+#16: 7
+#20: 4
+
+test::foo: 12
+test::bar: 1
+
+//! > ap_solution_linear
+#12: 5
+#16: 7
+#20: 4
+
+test::foo: 12
+test::bar: 1
+
+//! > sierra_code
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+type RangeCheck = RangeCheck [storable: true, drop: false, dup: false, zero_sized: false];
+type NonZero<felt252> = NonZero<felt252> [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 0> = Const<felt252, 0> [storable: false, drop: false, dup: false, zero_sized: false];
+
+libfunc const_as_immediate<Const<felt252, 0>> = const_as_immediate<Const<felt252, 0>>;
+libfunc felt252_sub = felt252_sub;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc felt252_is_zero = felt252_is_zero;
+libfunc branch_align = branch_align;
+libfunc withdraw_gas = withdraw_gas;
+libfunc store_temp<RangeCheck> = store_temp<RangeCheck>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc jump = jump;
+libfunc drop<NonZero<felt252>> = drop<NonZero<felt252>>;
+libfunc function_call<user@test::bar> = function_call<user@test::bar>;
+libfunc redeposit_gas = redeposit_gas;
+
+F0:
+const_as_immediate<Const<felt252, 0>>() -> ([3]);
+felt252_sub([2], [3]) -> ([4]);
+store_temp<felt252>([4]) -> ([4]);
+felt252_is_zero([4]) { fallthrough() F0_B2([5]) };
+branch_align() -> ();
+withdraw_gas([0], [1]) { fallthrough([6], [7]) F0_B1([8], [9]) };
+branch_align() -> ();
+withdraw_gas([6], [7]) { fallthrough([10], [11]) F0_B0([12], [13]) };
+branch_align() -> ();
+store_temp<RangeCheck>([10]) -> ([14]);
+store_temp<GasBuiltin>([11]) -> ([15]);
+jump() { F0_B3() };
+F0_B0:
+branch_align() -> ();
+store_temp<RangeCheck>([12]) -> ([12]);
+store_temp<GasBuiltin>([13]) -> ([13]);
+return([12], [13]);
+F0_B1:
+branch_align() -> ();
+store_temp<RangeCheck>([8]) -> ([8]);
+store_temp<GasBuiltin>([9]) -> ([9]);
+return([8], [9]);
+F0_B2:
+branch_align() -> ();
+drop<NonZero<felt252>>([5]) -> ();
+store_temp<RangeCheck>([0]) -> ([14]);
+store_temp<GasBuiltin>([1]) -> ([15]);
+F0_B3:
+function_call<user@test::bar>([15]) -> ([16]);
+store_temp<RangeCheck>([14]) -> ([14]);
+store_temp<GasBuiltin>([16]) -> ([16]);
+return([14], [16]);
+F1:
+redeposit_gas([0]) -> ([1]);
+store_temp<GasBuiltin>([1]) -> ([1]);
+return([1]);
+
+test::foo@F0([0]: RangeCheck, [1]: GasBuiltin, [2]: felt252) -> (RangeCheck, GasBuiltin);
+test::bar@F1([0]: GasBuiltin) -> (GasBuiltin);
+
+//! > casm
+[fp + -3] = [ap + 0] + 0, ap++;
+jmp rel 39 if [ap + -1] != 0;
+%{ memory[ap + 0] = 0 <= memory[fp + -4] %}
+jmp rel 7 if [ap + 0] != 0, ap++;
+[ap + 0] = [fp + -4] + 340282366920938463463374607431768211456, ap++;
+[ap + -1] = [[fp + -5] + 0];
+jmp rel 26;
+[fp + -4] = [ap + 0] + 0, ap++;
+[ap + -1] = [[fp + -5] + 0];
+%{ memory[ap + 0] = 700 <= memory[ap + -1] %}
+jmp rel 7 if [ap + 0] != 0, ap++;
+[ap + 0] = [ap + -2] + 340282366920938463463374607431768210756, ap++;
+[ap + -1] = [[fp + -5] + 1];
+jmp rel 10;
+[ap + -2] = [ap + 0] + 700, ap++;
+[ap + -1] = [[fp + -5] + 1];
+[ap + 0] = [fp + -5] + 2, ap++;
+[ap + 0] = [ap + -2], ap++;
+jmp rel 18;
+ap += 5;
+[ap + 0] = [fp + -5] + 2, ap++;
+[ap + 0] = [ap + -9], ap++;
+ret;
+ap += 7;
+[ap + 0] = [fp + -5] + 1, ap++;
+[ap + 0] = [fp + -4], ap++;
+ret;
+ap += 4;
+[ap + 0] = [fp + -5], ap++;
+[ap + 0] = [fp + -4], ap++;
+call rel 5;
+[ap + 0] = [ap + -5], ap++;
+[ap + 0] = [ap + -2], ap++;
+ret;
+[ap + 0] = [fp + -3] + 1900, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > redeposit_gas libfunc
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+fn foo(x: felt252) {
+    if x == 0 {
+        bar();
+        bar();
+        core::gas::redeposit_gas();
+        return ();
+    } else {
+        core::gas::redeposit_gas();
+        if x == 1 {
+            bar();
+        } else {
+            core::gas::redeposit_gas();
+        }
+        return ();
+    }
+}
+
+#[inline(never)]
+fn bar() {
+    core::gas::redeposit_gas();
+}
+
+//! > enforced_costs
+test::bar 10000
+test::foo 100000
+
+//! > gas_solution_lp
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#10: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 79200, Step: 0, Hole: 5, RangeCheck: 0})
+#13: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#15: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 89170, Step: 1, Hole: 0, RangeCheck: 0})
+#20: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 2, RangeCheck: 0})
+#24: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#27: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9980, Step: 1, Hole: 0, RangeCheck: 0})
+#30: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 100000, Step: 10, Hole: 5, RangeCheck: 0})
+test::bar: SmallOrderedMap({Const: 10000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#10: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 79200, Step: 0, Hole: 5, RangeCheck: 0})
+#13: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#15: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 89170, Step: 1, Hole: 0, RangeCheck: 0})
+#20: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 2, RangeCheck: 0})
+#24: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#27: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9980, Step: 1, Hole: 0, RangeCheck: 0})
+#30: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 9900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 100000, Step: 10, Hole: 5, RangeCheck: 0})
+test::bar: SmallOrderedMap({Const: 10000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+#13: 3
+#24: 2
+
+test::bar: 1
+test::foo: 9
+
+//! > ap_solution_linear
+#13: 3
+#24: 2
+
+test::foo: 9
+test::bar: 1
+
+//! > sierra_code
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 1> = Const<felt252, 1> [storable: false, drop: false, dup: false, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+type NonZero<felt252> = NonZero<felt252> [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 0> = Const<felt252, 0> [storable: false, drop: false, dup: false, zero_sized: false];
+
+libfunc const_as_immediate<Const<felt252, 0>> = const_as_immediate<Const<felt252, 0>>;
+libfunc dup<felt252> = dup<felt252>;
+libfunc felt252_sub = felt252_sub;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc felt252_is_zero = felt252_is_zero;
+libfunc branch_align = branch_align;
+libfunc drop<felt252> = drop<felt252>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc function_call<user@test::bar> = function_call<user@test::bar>;
+libfunc redeposit_gas = redeposit_gas;
+libfunc drop<NonZero<felt252>> = drop<NonZero<felt252>>;
+libfunc const_as_immediate<Const<felt252, 1>> = const_as_immediate<Const<felt252, 1>>;
+
+F0:
+const_as_immediate<Const<felt252, 0>>() -> ([2]);
+dup<felt252>([1]) -> ([1], [3]);
+felt252_sub([3], [2]) -> ([4]);
+store_temp<felt252>([4]) -> ([4]);
+felt252_is_zero([4]) { fallthrough() F0_B0([5]) };
+branch_align() -> ();
+drop<felt252>([1]) -> ();
+store_temp<GasBuiltin>([0]) -> ([0]);
+function_call<user@test::bar>([0]) -> ([6]);
+function_call<user@test::bar>([6]) -> ([7]);
+redeposit_gas([7]) -> ([8]);
+store_temp<GasBuiltin>([8]) -> ([8]);
+return([8]);
+F0_B0:
+branch_align() -> ();
+drop<NonZero<felt252>>([5]) -> ();
+redeposit_gas([0]) -> ([9]);
+const_as_immediate<Const<felt252, 1>>() -> ([10]);
+felt252_sub([1], [10]) -> ([11]);
+store_temp<felt252>([11]) -> ([11]);
+felt252_is_zero([11]) { fallthrough() F0_B1([12]) };
+branch_align() -> ();
+store_temp<GasBuiltin>([9]) -> ([9]);
+function_call<user@test::bar>([9]) -> ([13]);
+return([13]);
+F0_B1:
+branch_align() -> ();
+drop<NonZero<felt252>>([12]) -> ();
+store_temp<GasBuiltin>([9]) -> ([9]);
+redeposit_gas([9]) -> ([14]);
+store_temp<GasBuiltin>([14]) -> ([14]);
+return([14]);
+F1:
+redeposit_gas([0]) -> ([1]);
+store_temp<GasBuiltin>([1]) -> ([1]);
+return([1]);
+
+test::foo@F0([0]: GasBuiltin, [1]: felt252) -> (GasBuiltin);
+test::bar@F1([0]: GasBuiltin) -> (GasBuiltin);
+
+//! > casm
+[fp + -3] = [ap + 0] + 0, ap++;
+jmp rel 10 if [ap + -1] != 0;
+[ap + 0] = [fp + -4], ap++;
+call rel 25;
+call rel 23;
+[ap + 0] = [ap + -1] + 79200, ap++;
+ret;
+ap += 3;
+[fp + -3] = [ap + 0] + 1, ap++;
+jmp rel 7 if [ap + -1] != 0;
+[ap + 0] = [fp + -4] + 89170, ap++;
+call rel 10;
+ret;
+ap += 2;
+[ap + 0] = [fp + -4] + 89170, ap++;
+[ap + 0] = [ap + -1] + 9980, ap++;
+ret;
+[ap + 0] = [fp + -3] + 9900, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > Precost gas mismatch.
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+fn foo() -> u128 {
+    match core::gas::withdraw_gas() {
+        None => 2,
+        Some(_) => 3_u128 & 1,
+    }
+}
+
+//! > gas_solution_lp
+#0: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 180, Step: 2, Hole: 0, RangeCheck: 0})
+#1: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 2, RangeCheck: 0})
+#14: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 1, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Bitwise: 1, Const: 990, Step: 9, Hole: 2, RangeCheck: 1})
+
+//! > gas_solution_linear
+#0: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 1, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 90, Step: 1, Hole: 0, RangeCheck: 0})
+#1: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 1, RangeCheck: 0})
+#14: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 1680, Step: 16, Hole: 1, RangeCheck: 1})
+
+//! > ap_solution_lp
+#14: 2
+
+test::foo: 8
+
+//! > ap_solution_linear
+#14: 1
+
+test::foo: 14
+
+//! > sierra_code
+type RangeCheck = RangeCheck [storable: true, drop: false, dup: false, zero_sized: false];
+type Const<u128, 2> = Const<u128, 2> [storable: false, drop: false, dup: false, zero_sized: false];
+type Bitwise = Bitwise [storable: true, drop: false, dup: false, zero_sized: false];
+type Const<u128, 1> = Const<u128, 1> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<u128, 3> = Const<u128, 3> [storable: false, drop: false, dup: false, zero_sized: false];
+type u128 = u128 [storable: true, drop: true, dup: true, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+
+libfunc withdraw_gas = withdraw_gas;
+libfunc branch_align = branch_align;
+libfunc const_as_immediate<Const<u128, 3>> = const_as_immediate<Const<u128, 3>>;
+libfunc const_as_immediate<Const<u128, 1>> = const_as_immediate<Const<u128, 1>>;
+libfunc store_temp<u128> = store_temp<u128>;
+libfunc bitwise = bitwise;
+libfunc drop<u128> = drop<u128>;
+libfunc store_temp<RangeCheck> = store_temp<RangeCheck>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc store_temp<Bitwise> = store_temp<Bitwise>;
+libfunc const_as_immediate<Const<u128, 2>> = const_as_immediate<Const<u128, 2>>;
+
+F0:
+withdraw_gas([0], [1]) { fallthrough([3], [4]) F0_B0([5], [6]) };
+branch_align() -> ();
+const_as_immediate<Const<u128, 3>>() -> ([7]);
+const_as_immediate<Const<u128, 1>>() -> ([8]);
+store_temp<u128>([7]) -> ([7]);
+store_temp<u128>([8]) -> ([8]);
+bitwise([2], [7], [8]) -> ([9], [10], [11], [12]);
+drop<u128>([11]) -> ();
+drop<u128>([12]) -> ();
+store_temp<RangeCheck>([3]) -> ([3]);
+store_temp<GasBuiltin>([4]) -> ([4]);
+store_temp<Bitwise>([9]) -> ([9]);
+store_temp<u128>([10]) -> ([10]);
+return([3], [4], [9], [10]);
+F0_B0:
+branch_align() -> ();
+const_as_immediate<Const<u128, 2>>() -> ([13]);
+store_temp<RangeCheck>([5]) -> ([5]);
+store_temp<GasBuiltin>([6]) -> ([6]);
+store_temp<Bitwise>([2]) -> ([2]);
+store_temp<u128>([13]) -> ([13]);
+return([5], [6], [2], [13]);
+
+test::foo@F0([0]: RangeCheck, [1]: GasBuiltin, [2]: Bitwise) -> (RangeCheck, GasBuiltin, Bitwise, u128);
+
+//! > casm
+call rel 40;
+[ap + 0] = [ap + -1] + 39, ap++;
+[ap + 0] = [[ap + -1] + 0], ap++;
+[ap + 0] = [[ap + -1] + 1], ap++;
+[ap + 0] = [ap + -1] + 90, ap++;
+%{ memory[ap + 0] = memory[ap + -1] <= memory[fp + -4] %}
+jmp rel 8 if [ap + 0] != 0, ap++;
+[fp + -4] = [ap + 0] + [ap + -2], ap++;
+[ap + 0] = [ap + -1] + 340282366920938463463374607431768211456, ap++;
+[ap + -1] = [[fp + -5] + 0];
+jmp rel 17;
+[fp + -4] = [ap + 0] + [ap + -2], ap++;
+[ap + -1] = [[fp + -5] + 0];
+[ap + 0] = 3, ap++;
+[ap + 0] = 1, ap++;
+[ap + -2] = [[fp + -3] + 0];
+[ap + -1] = [[fp + -3] + 1];
+[ap + 0] = [fp + -5] + 1, ap++;
+[ap + 0] = [ap + -4], ap++;
+[ap + 0] = [fp + -3] + 5, ap++;
+[ap + 0] = [[fp + -3] + 2], ap++;
+ret;
+ap += 1;
+[ap + 0] = [fp + -5] + 1, ap++;
+[ap + 0] = [fp + -4], ap++;
+[ap + 0] = [fp + -3], ap++;
+[ap + 0] = 2, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > Function non-const redeposit.
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+fn foo(x: felt252) {
+    if x == 0 {
+        bar();
+        bar();
+        bar();
+        return ();
+    } else {
+        core::gas::redeposit_gas();
+        return ();
+    }
+}
+
+#[inline(never)]
+fn bar() {
+    1 & 2_u128;
+}
+
+//! > gas_solution_lp
+#4: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 9, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#14: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 3, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1310, Step: 14, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Bitwise: 3, Const: 2600, Step: 26, Hole: 9, RangeCheck: 0})
+test::bar: SmallOrderedMap({Bitwise: 1, Const: 500, Step: 5, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#4: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 9, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#14: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 3, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1310, Step: 14, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Bitwise: 3, Const: 2600, Step: 26, Hole: 9, RangeCheck: 0})
+test::bar: SmallOrderedMap({Bitwise: 1, Const: 500, Step: 5, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+#12: 9
+
+test::bar: 3
+test::foo: 19
+
+//! > ap_solution_linear
+#12: 9
+
+test::foo: 19
+test::bar: 3
+
+//! > sierra_code
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<u128, 2> = Const<u128, 2> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<u128, 1> = Const<u128, 1> [storable: false, drop: false, dup: false, zero_sized: false];
+type u128 = u128 [storable: true, drop: true, dup: true, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+type Bitwise = Bitwise [storable: true, drop: false, dup: false, zero_sized: false];
+type NonZero<felt252> = NonZero<felt252> [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 0> = Const<felt252, 0> [storable: false, drop: false, dup: false, zero_sized: false];
+
+libfunc const_as_immediate<Const<felt252, 0>> = const_as_immediate<Const<felt252, 0>>;
+libfunc felt252_sub = felt252_sub;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc felt252_is_zero = felt252_is_zero;
+libfunc branch_align = branch_align;
+libfunc store_temp<Bitwise> = store_temp<Bitwise>;
+libfunc function_call<user@test::bar> = function_call<user@test::bar>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc drop<NonZero<felt252>> = drop<NonZero<felt252>>;
+libfunc redeposit_gas = redeposit_gas;
+libfunc const_as_immediate<Const<u128, 1>> = const_as_immediate<Const<u128, 1>>;
+libfunc const_as_immediate<Const<u128, 2>> = const_as_immediate<Const<u128, 2>>;
+libfunc store_temp<u128> = store_temp<u128>;
+libfunc bitwise = bitwise;
+libfunc drop<u128> = drop<u128>;
+
+F0:
+const_as_immediate<Const<felt252, 0>>() -> ([3]);
+felt252_sub([2], [3]) -> ([4]);
+store_temp<felt252>([4]) -> ([4]);
+felt252_is_zero([4]) { fallthrough() F0_B0([5]) };
+branch_align() -> ();
+store_temp<Bitwise>([1]) -> ([1]);
+function_call<user@test::bar>([1]) -> ([6]);
+function_call<user@test::bar>([6]) -> ([7]);
+function_call<user@test::bar>([7]) -> ([8]);
+store_temp<GasBuiltin>([0]) -> ([0]);
+store_temp<Bitwise>([8]) -> ([8]);
+return([0], [8]);
+F0_B0:
+branch_align() -> ();
+drop<NonZero<felt252>>([5]) -> ();
+redeposit_gas([0]) -> ([9]);
+store_temp<GasBuiltin>([9]) -> ([9]);
+store_temp<Bitwise>([1]) -> ([1]);
+return([9], [1]);
+F1:
+const_as_immediate<Const<u128, 1>>() -> ([1]);
+const_as_immediate<Const<u128, 2>>() -> ([2]);
+store_temp<u128>([1]) -> ([1]);
+store_temp<u128>([2]) -> ([2]);
+bitwise([0], [1], [2]) -> ([3], [4], [5], [6]);
+drop<u128>([4]) -> ();
+drop<u128>([5]) -> ();
+drop<u128>([6]) -> ();
+store_temp<Bitwise>([3]) -> ([3]);
+return([3]);
+
+test::foo@F0([0]: GasBuiltin, [1]: Bitwise, [2]: felt252) -> (GasBuiltin, Bitwise);
+test::bar@F1([0]: Bitwise) -> (Bitwise);
+
+//! > casm
+[fp + -3] = [ap + 0] + 0, ap++;
+jmp rel 12 if [ap + -1] != 0;
+[ap + 0] = [fp + -4], ap++;
+call rel 24;
+call rel 22;
+call rel 20;
+[ap + 0] = [fp + -5], ap++;
+[ap + 0] = [ap + -2], ap++;
+ret;
+ap += 9;
+call rel 22;
+[ap + 0] = [ap + -1] + 21, ap++;
+[ap + 0] = [[ap + -1] + 0], ap++;
+[ap + 0] = [[ap + -1] + 1], ap++;
+[ap + 0] = [ap + -1] * 3, ap++;
+[ap + 0] = [ap + -1] + 1310, ap++;
+[ap + 0] = [fp + -5] + [ap + -1], ap++;
+[ap + 0] = [fp + -4], ap++;
+ret;
+[ap + 0] = 1, ap++;
+[ap + 0] = 2, ap++;
+[ap + -2] = [[fp + -3] + 0];
+[ap + -1] = [[fp + -3] + 1];
+[ap + 0] = [fp + -3] + 5, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > Function overuse ap-changes.
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+#[inline(never)]
+fn function_with_branch_align(cond: bool) -> felt252 {
+    if cond {
+        1
+    } else {
+        2
+    }
+}
+
+fn foo(cond: bool) {
+    if cond {
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+        1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    } else {
+        function_with_branch_align(false);
+        function_with_branch_align(false);
+        function_with_branch_align(false);
+    }
+}
+
+//! > gas_solution_lp
+#1: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#6: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 10470, Step: 117, Hole: 0, RangeCheck: 0})
+#28: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 123, RangeCheck: 0})
+
+test::function_with_branch_align: SmallOrderedMap({Const: 710, Step: 3, Hole: 41, RangeCheck: 0})
+test::foo: SmallOrderedMap({Const: 13600, Step: 136, Hole: 123, RangeCheck: 0})
+
+//! > gas_solution_linear
+#1: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#6: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#12: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 10670, Step: 119, Hole: 0, RangeCheck: 0})
+#28: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 123, RangeCheck: 0})
+
+test::function_with_branch_align: SmallOrderedMap({Const: 200, Step: 2, Hole: 0, RangeCheck: 0})
+test::foo: SmallOrderedMap({Const: 13600, Step: 136, Hole: 123, RangeCheck: 0})
+
+//! > ap_solution_lp
+#1: 41
+#6: 41
+
+test::function_with_branch_align: 42
+test::foo: 135
+
+//! > ap_solution_linear
+#12: 123
+
+test::function_with_branch_align: 1
+test::foo: 135
+
+//! > sierra_code
+type Unit = Struct<ut@Tuple> [storable: true, drop: true, dup: true, zero_sized: true];
+type core::bool = Enum<ut@core::bool, Unit, Unit> [storable: true, drop: true, dup: true, zero_sized: false];
+type Const<felt252, 1> = Const<felt252, 1> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 2> = Const<felt252, 2> [storable: false, drop: false, dup: false, zero_sized: false];
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+
+libfunc enum_match<core::bool> = enum_match<core::bool>;
+libfunc branch_align = branch_align;
+libfunc drop<Unit> = drop<Unit>;
+libfunc const_as_immediate<Const<felt252, 2>> = const_as_immediate<Const<felt252, 2>>;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc const_as_immediate<Const<felt252, 1>> = const_as_immediate<Const<felt252, 1>>;
+libfunc struct_construct<Unit> = struct_construct<Unit>;
+libfunc enum_init<core::bool, 0> = enum_init<core::bool, 0>;
+libfunc store_temp<core::bool> = store_temp<core::bool>;
+libfunc dup<core::bool> = dup<core::bool>;
+libfunc function_call<user@test::function_with_branch_align> = function_call<user@test::function_with_branch_align>;
+libfunc drop<felt252> = drop<felt252>;
+libfunc dup<felt252> = dup<felt252>;
+libfunc felt252_add = felt252_add;
+
+F0:
+enum_match<core::bool>([0]) { fallthrough([1]) F0_B0([2]) };
+branch_align() -> ();
+drop<Unit>([1]) -> ();
+const_as_immediate<Const<felt252, 2>>() -> ([3]);
+store_temp<felt252>([3]) -> ([3]);
+return([3]);
+F0_B0:
+branch_align() -> ();
+drop<Unit>([2]) -> ();
+const_as_immediate<Const<felt252, 1>>() -> ([4]);
+store_temp<felt252>([4]) -> ([4]);
+return([4]);
+F1:
+enum_match<core::bool>([0]) { fallthrough([1]) F1_B0([2]) };
+branch_align() -> ();
+drop<Unit>([1]) -> ();
+struct_construct<Unit>() -> ([3]);
+enum_init<core::bool, 0>([3]) -> ([4]);
+store_temp<core::bool>([4]) -> ([5]);
+dup<core::bool>([5]) -> ([5], [4]);
+function_call<user@test::function_with_branch_align>([5]) -> ([6]);
+drop<felt252>([6]) -> ();
+dup<core::bool>([4]) -> ([4], [7]);
+store_temp<core::bool>([7]) -> ([7]);
+function_call<user@test::function_with_branch_align>([7]) -> ([8]);
+drop<felt252>([8]) -> ();
+store_temp<core::bool>([4]) -> ([4]);
+function_call<user@test::function_with_branch_align>([4]) -> ([9]);
+drop<felt252>([9]) -> ();
+return();
+F1_B0:
+branch_align() -> ();
+drop<Unit>([2]) -> ();
+const_as_immediate<Const<felt252, 1>>() -> ([10]);
+dup<felt252>([10]) -> ([10], [11]);
+dup<felt252>([10]) -> ([10], [12]);
+store_temp<felt252>([11]) -> ([11]);
+felt252_add([11], [12]) -> ([13]);
+dup<felt252>([10]) -> ([10], [14]);
+store_temp<felt252>([13]) -> ([13]);
+felt252_add([13], [14]) -> ([15]);
+dup<felt252>([10]) -> ([10], [16]);
+store_temp<felt252>([15]) -> ([15]);
+felt252_add([15], [16]) -> ([17]);
+dup<felt252>([10]) -> ([10], [18]);
+store_temp<felt252>([17]) -> ([17]);
+felt252_add([17], [18]) -> ([19]);
+dup<felt252>([10]) -> ([10], [20]);
+store_temp<felt252>([19]) -> ([19]);
+felt252_add([19], [20]) -> ([21]);
+dup<felt252>([10]) -> ([10], [22]);
+store_temp<felt252>([21]) -> ([21]);
+felt252_add([21], [22]) -> ([23]);
+dup<felt252>([10]) -> ([10], [24]);
+store_temp<felt252>([23]) -> ([23]);
+felt252_add([23], [24]) -> ([25]);
+dup<felt252>([10]) -> ([10], [26]);
+store_temp<felt252>([25]) -> ([25]);
+felt252_add([25], [26]) -> ([27]);
+dup<felt252>([10]) -> ([10], [28]);
+store_temp<felt252>([27]) -> ([27]);
+felt252_add([27], [28]) -> ([29]);
+dup<felt252>([10]) -> ([10], [30]);
+store_temp<felt252>([29]) -> ([29]);
+felt252_add([29], [30]) -> ([31]);
+dup<felt252>([10]) -> ([10], [32]);
+store_temp<felt252>([31]) -> ([31]);
+felt252_add([31], [32]) -> ([33]);
+dup<felt252>([10]) -> ([10], [34]);
+store_temp<felt252>([33]) -> ([33]);
+felt252_add([33], [34]) -> ([35]);
+dup<felt252>([10]) -> ([10], [36]);
+store_temp<felt252>([35]) -> ([35]);
+felt252_add([35], [36]) -> ([37]);
+dup<felt252>([10]) -> ([10], [38]);
+store_temp<felt252>([37]) -> ([37]);
+felt252_add([37], [38]) -> ([39]);
+dup<felt252>([10]) -> ([10], [40]);
+store_temp<felt252>([39]) -> ([39]);
+felt252_add([39], [40]) -> ([41]);
+drop<felt252>([41]) -> ();
+dup<felt252>([10]) -> ([10], [42]);
+dup<felt252>([10]) -> ([10], [43]);
+store_temp<felt252>([42]) -> ([42]);
+felt252_add([42], [43]) -> ([44]);
+dup<felt252>([10]) -> ([10], [45]);
+store_temp<felt252>([44]) -> ([44]);
+felt252_add([44], [45]) -> ([46]);
+dup<felt252>([10]) -> ([10], [47]);
+store_temp<felt252>([46]) -> ([46]);
+felt252_add([46], [47]) -> ([48]);
+dup<felt252>([10]) -> ([10], [49]);
+store_temp<felt252>([48]) -> ([48]);
+felt252_add([48], [49]) -> ([50]);
+dup<felt252>([10]) -> ([10], [51]);
+store_temp<felt252>([50]) -> ([50]);
+felt252_add([50], [51]) -> ([52]);
+dup<felt252>([10]) -> ([10], [53]);
+store_temp<felt252>([52]) -> ([52]);
+felt252_add([52], [53]) -> ([54]);
+dup<felt252>([10]) -> ([10], [55]);
+store_temp<felt252>([54]) -> ([54]);
+felt252_add([54], [55]) -> ([56]);
+dup<felt252>([10]) -> ([10], [57]);
+store_temp<felt252>([56]) -> ([56]);
+felt252_add([56], [57]) -> ([58]);
+dup<felt252>([10]) -> ([10], [59]);
+store_temp<felt252>([58]) -> ([58]);
+felt252_add([58], [59]) -> ([60]);
+dup<felt252>([10]) -> ([10], [61]);
+store_temp<felt252>([60]) -> ([60]);
+felt252_add([60], [61]) -> ([62]);
+dup<felt252>([10]) -> ([10], [63]);
+store_temp<felt252>([62]) -> ([62]);
+felt252_add([62], [63]) -> ([64]);
+dup<felt252>([10]) -> ([10], [65]);
+store_temp<felt252>([64]) -> ([64]);
+felt252_add([64], [65]) -> ([66]);
+dup<felt252>([10]) -> ([10], [67]);
+store_temp<felt252>([66]) -> ([66]);
+felt252_add([66], [67]) -> ([68]);
+dup<felt252>([10]) -> ([10], [69]);
+store_temp<felt252>([68]) -> ([68]);
+felt252_add([68], [69]) -> ([70]);
+dup<felt252>([10]) -> ([10], [71]);
+store_temp<felt252>([70]) -> ([70]);
+felt252_add([70], [71]) -> ([72]);
+drop<felt252>([72]) -> ();
+dup<felt252>([10]) -> ([10], [73]);
+dup<felt252>([10]) -> ([10], [74]);
+store_temp<felt252>([73]) -> ([73]);
+felt252_add([73], [74]) -> ([75]);
+dup<felt252>([10]) -> ([10], [76]);
+store_temp<felt252>([75]) -> ([75]);
+felt252_add([75], [76]) -> ([77]);
+dup<felt252>([10]) -> ([10], [78]);
+store_temp<felt252>([77]) -> ([77]);
+felt252_add([77], [78]) -> ([79]);
+dup<felt252>([10]) -> ([10], [80]);
+store_temp<felt252>([79]) -> ([79]);
+felt252_add([79], [80]) -> ([81]);
+dup<felt252>([10]) -> ([10], [82]);
+store_temp<felt252>([81]) -> ([81]);
+felt252_add([81], [82]) -> ([83]);
+dup<felt252>([10]) -> ([10], [84]);
+store_temp<felt252>([83]) -> ([83]);
+felt252_add([83], [84]) -> ([85]);
+dup<felt252>([10]) -> ([10], [86]);
+store_temp<felt252>([85]) -> ([85]);
+felt252_add([85], [86]) -> ([87]);
+dup<felt252>([10]) -> ([10], [88]);
+store_temp<felt252>([87]) -> ([87]);
+felt252_add([87], [88]) -> ([89]);
+dup<felt252>([10]) -> ([10], [90]);
+store_temp<felt252>([89]) -> ([89]);
+felt252_add([89], [90]) -> ([91]);
+dup<felt252>([10]) -> ([10], [92]);
+store_temp<felt252>([91]) -> ([91]);
+felt252_add([91], [92]) -> ([93]);
+dup<felt252>([10]) -> ([10], [94]);
+store_temp<felt252>([93]) -> ([93]);
+felt252_add([93], [94]) -> ([95]);
+dup<felt252>([10]) -> ([10], [96]);
+store_temp<felt252>([95]) -> ([95]);
+felt252_add([95], [96]) -> ([97]);
+dup<felt252>([10]) -> ([10], [98]);
+store_temp<felt252>([97]) -> ([97]);
+felt252_add([97], [98]) -> ([99]);
+dup<felt252>([10]) -> ([10], [100]);
+store_temp<felt252>([99]) -> ([99]);
+felt252_add([99], [100]) -> ([101]);
+dup<felt252>([10]) -> ([10], [102]);
+store_temp<felt252>([101]) -> ([101]);
+felt252_add([101], [102]) -> ([103]);
+drop<felt252>([103]) -> ();
+dup<felt252>([10]) -> ([10], [104]);
+dup<felt252>([10]) -> ([10], [105]);
+store_temp<felt252>([104]) -> ([104]);
+felt252_add([104], [105]) -> ([106]);
+dup<felt252>([10]) -> ([10], [107]);
+store_temp<felt252>([106]) -> ([106]);
+felt252_add([106], [107]) -> ([108]);
+dup<felt252>([10]) -> ([10], [109]);
+store_temp<felt252>([108]) -> ([108]);
+felt252_add([108], [109]) -> ([110]);
+dup<felt252>([10]) -> ([10], [111]);
+store_temp<felt252>([110]) -> ([110]);
+felt252_add([110], [111]) -> ([112]);
+dup<felt252>([10]) -> ([10], [113]);
+store_temp<felt252>([112]) -> ([112]);
+felt252_add([112], [113]) -> ([114]);
+dup<felt252>([10]) -> ([10], [115]);
+store_temp<felt252>([114]) -> ([114]);
+felt252_add([114], [115]) -> ([116]);
+dup<felt252>([10]) -> ([10], [117]);
+store_temp<felt252>([116]) -> ([116]);
+felt252_add([116], [117]) -> ([118]);
+dup<felt252>([10]) -> ([10], [119]);
+store_temp<felt252>([118]) -> ([118]);
+felt252_add([118], [119]) -> ([120]);
+dup<felt252>([10]) -> ([10], [121]);
+store_temp<felt252>([120]) -> ([120]);
+felt252_add([120], [121]) -> ([122]);
+dup<felt252>([10]) -> ([10], [123]);
+store_temp<felt252>([122]) -> ([122]);
+felt252_add([122], [123]) -> ([124]);
+dup<felt252>([10]) -> ([10], [125]);
+store_temp<felt252>([124]) -> ([124]);
+felt252_add([124], [125]) -> ([126]);
+dup<felt252>([10]) -> ([10], [127]);
+store_temp<felt252>([126]) -> ([126]);
+felt252_add([126], [127]) -> ([128]);
+dup<felt252>([10]) -> ([10], [129]);
+store_temp<felt252>([128]) -> ([128]);
+felt252_add([128], [129]) -> ([130]);
+dup<felt252>([10]) -> ([10], [131]);
+store_temp<felt252>([130]) -> ([130]);
+felt252_add([130], [131]) -> ([132]);
+dup<felt252>([10]) -> ([10], [133]);
+store_temp<felt252>([132]) -> ([132]);
+felt252_add([132], [133]) -> ([134]);
+drop<felt252>([134]) -> ();
+dup<felt252>([10]) -> ([10], [135]);
+dup<felt252>([10]) -> ([10], [136]);
+store_temp<felt252>([135]) -> ([135]);
+felt252_add([135], [136]) -> ([137]);
+dup<felt252>([10]) -> ([10], [138]);
+store_temp<felt252>([137]) -> ([137]);
+felt252_add([137], [138]) -> ([139]);
+dup<felt252>([10]) -> ([10], [140]);
+store_temp<felt252>([139]) -> ([139]);
+felt252_add([139], [140]) -> ([141]);
+dup<felt252>([10]) -> ([10], [142]);
+store_temp<felt252>([141]) -> ([141]);
+felt252_add([141], [142]) -> ([143]);
+dup<felt252>([10]) -> ([10], [144]);
+store_temp<felt252>([143]) -> ([143]);
+felt252_add([143], [144]) -> ([145]);
+dup<felt252>([10]) -> ([10], [146]);
+store_temp<felt252>([145]) -> ([145]);
+felt252_add([145], [146]) -> ([147]);
+dup<felt252>([10]) -> ([10], [148]);
+store_temp<felt252>([147]) -> ([147]);
+felt252_add([147], [148]) -> ([149]);
+dup<felt252>([10]) -> ([10], [150]);
+store_temp<felt252>([149]) -> ([149]);
+felt252_add([149], [150]) -> ([151]);
+dup<felt252>([10]) -> ([10], [152]);
+store_temp<felt252>([151]) -> ([151]);
+felt252_add([151], [152]) -> ([153]);
+dup<felt252>([10]) -> ([10], [154]);
+store_temp<felt252>([153]) -> ([153]);
+felt252_add([153], [154]) -> ([155]);
+dup<felt252>([10]) -> ([10], [156]);
+store_temp<felt252>([155]) -> ([155]);
+felt252_add([155], [156]) -> ([157]);
+dup<felt252>([10]) -> ([10], [158]);
+store_temp<felt252>([157]) -> ([157]);
+felt252_add([157], [158]) -> ([159]);
+dup<felt252>([10]) -> ([10], [160]);
+store_temp<felt252>([159]) -> ([159]);
+felt252_add([159], [160]) -> ([161]);
+dup<felt252>([10]) -> ([10], [162]);
+store_temp<felt252>([161]) -> ([161]);
+felt252_add([161], [162]) -> ([163]);
+dup<felt252>([10]) -> ([10], [164]);
+store_temp<felt252>([163]) -> ([163]);
+felt252_add([163], [164]) -> ([165]);
+drop<felt252>([165]) -> ();
+dup<felt252>([10]) -> ([10], [166]);
+dup<felt252>([10]) -> ([10], [167]);
+store_temp<felt252>([166]) -> ([166]);
+felt252_add([166], [167]) -> ([168]);
+dup<felt252>([10]) -> ([10], [169]);
+store_temp<felt252>([168]) -> ([168]);
+felt252_add([168], [169]) -> ([170]);
+dup<felt252>([10]) -> ([10], [171]);
+store_temp<felt252>([170]) -> ([170]);
+felt252_add([170], [171]) -> ([172]);
+dup<felt252>([10]) -> ([10], [173]);
+store_temp<felt252>([172]) -> ([172]);
+felt252_add([172], [173]) -> ([174]);
+dup<felt252>([10]) -> ([10], [175]);
+store_temp<felt252>([174]) -> ([174]);
+felt252_add([174], [175]) -> ([176]);
+dup<felt252>([10]) -> ([10], [177]);
+store_temp<felt252>([176]) -> ([176]);
+felt252_add([176], [177]) -> ([178]);
+dup<felt252>([10]) -> ([10], [179]);
+store_temp<felt252>([178]) -> ([178]);
+felt252_add([178], [179]) -> ([180]);
+dup<felt252>([10]) -> ([10], [181]);
+store_temp<felt252>([180]) -> ([180]);
+felt252_add([180], [181]) -> ([182]);
+dup<felt252>([10]) -> ([10], [183]);
+store_temp<felt252>([182]) -> ([182]);
+felt252_add([182], [183]) -> ([184]);
+dup<felt252>([10]) -> ([10], [185]);
+store_temp<felt252>([184]) -> ([184]);
+felt252_add([184], [185]) -> ([186]);
+dup<felt252>([10]) -> ([10], [187]);
+store_temp<felt252>([186]) -> ([186]);
+felt252_add([186], [187]) -> ([188]);
+dup<felt252>([10]) -> ([10], [189]);
+store_temp<felt252>([188]) -> ([188]);
+felt252_add([188], [189]) -> ([190]);
+dup<felt252>([10]) -> ([10], [191]);
+store_temp<felt252>([190]) -> ([190]);
+felt252_add([190], [191]) -> ([192]);
+dup<felt252>([10]) -> ([10], [193]);
+store_temp<felt252>([192]) -> ([192]);
+felt252_add([192], [193]) -> ([194]);
+dup<felt252>([10]) -> ([10], [195]);
+store_temp<felt252>([194]) -> ([194]);
+felt252_add([194], [195]) -> ([196]);
+drop<felt252>([196]) -> ();
+dup<felt252>([10]) -> ([10], [197]);
+dup<felt252>([10]) -> ([10], [198]);
+store_temp<felt252>([197]) -> ([197]);
+felt252_add([197], [198]) -> ([199]);
+dup<felt252>([10]) -> ([10], [200]);
+store_temp<felt252>([199]) -> ([199]);
+felt252_add([199], [200]) -> ([201]);
+dup<felt252>([10]) -> ([10], [202]);
+store_temp<felt252>([201]) -> ([201]);
+felt252_add([201], [202]) -> ([203]);
+dup<felt252>([10]) -> ([10], [204]);
+store_temp<felt252>([203]) -> ([203]);
+felt252_add([203], [204]) -> ([205]);
+dup<felt252>([10]) -> ([10], [206]);
+store_temp<felt252>([205]) -> ([205]);
+felt252_add([205], [206]) -> ([207]);
+dup<felt252>([10]) -> ([10], [208]);
+store_temp<felt252>([207]) -> ([207]);
+felt252_add([207], [208]) -> ([209]);
+dup<felt252>([10]) -> ([10], [210]);
+store_temp<felt252>([209]) -> ([209]);
+felt252_add([209], [210]) -> ([211]);
+dup<felt252>([10]) -> ([10], [212]);
+store_temp<felt252>([211]) -> ([211]);
+felt252_add([211], [212]) -> ([213]);
+dup<felt252>([10]) -> ([10], [214]);
+store_temp<felt252>([213]) -> ([213]);
+felt252_add([213], [214]) -> ([215]);
+dup<felt252>([10]) -> ([10], [216]);
+store_temp<felt252>([215]) -> ([215]);
+felt252_add([215], [216]) -> ([217]);
+dup<felt252>([10]) -> ([10], [218]);
+store_temp<felt252>([217]) -> ([217]);
+felt252_add([217], [218]) -> ([219]);
+dup<felt252>([10]) -> ([10], [220]);
+store_temp<felt252>([219]) -> ([219]);
+felt252_add([219], [220]) -> ([221]);
+dup<felt252>([10]) -> ([10], [222]);
+store_temp<felt252>([221]) -> ([221]);
+felt252_add([221], [222]) -> ([223]);
+dup<felt252>([10]) -> ([10], [224]);
+store_temp<felt252>([223]) -> ([223]);
+felt252_add([223], [224]) -> ([225]);
+dup<felt252>([10]) -> ([10], [226]);
+store_temp<felt252>([225]) -> ([225]);
+felt252_add([225], [226]) -> ([227]);
+drop<felt252>([227]) -> ();
+dup<felt252>([10]) -> ([10], [228]);
+dup<felt252>([10]) -> ([10], [229]);
+store_temp<felt252>([228]) -> ([228]);
+felt252_add([228], [229]) -> ([230]);
+dup<felt252>([10]) -> ([10], [231]);
+store_temp<felt252>([230]) -> ([230]);
+felt252_add([230], [231]) -> ([232]);
+dup<felt252>([10]) -> ([10], [233]);
+store_temp<felt252>([232]) -> ([232]);
+felt252_add([232], [233]) -> ([234]);
+dup<felt252>([10]) -> ([10], [235]);
+store_temp<felt252>([234]) -> ([234]);
+felt252_add([234], [235]) -> ([236]);
+dup<felt252>([10]) -> ([10], [237]);
+store_temp<felt252>([236]) -> ([236]);
+felt252_add([236], [237]) -> ([238]);
+dup<felt252>([10]) -> ([10], [239]);
+store_temp<felt252>([238]) -> ([238]);
+felt252_add([238], [239]) -> ([240]);
+dup<felt252>([10]) -> ([10], [241]);
+store_temp<felt252>([240]) -> ([240]);
+felt252_add([240], [241]) -> ([242]);
+dup<felt252>([10]) -> ([10], [243]);
+store_temp<felt252>([242]) -> ([242]);
+felt252_add([242], [243]) -> ([244]);
+dup<felt252>([10]) -> ([10], [245]);
+store_temp<felt252>([244]) -> ([244]);
+felt252_add([244], [245]) -> ([246]);
+dup<felt252>([10]) -> ([10], [247]);
+store_temp<felt252>([246]) -> ([246]);
+felt252_add([246], [247]) -> ([248]);
+dup<felt252>([10]) -> ([10], [249]);
+store_temp<felt252>([248]) -> ([248]);
+felt252_add([248], [249]) -> ([250]);
+dup<felt252>([10]) -> ([10], [251]);
+store_temp<felt252>([250]) -> ([250]);
+felt252_add([250], [251]) -> ([252]);
+dup<felt252>([10]) -> ([10], [253]);
+store_temp<felt252>([252]) -> ([252]);
+felt252_add([252], [253]) -> ([254]);
+dup<felt252>([10]) -> ([10], [255]);
+store_temp<felt252>([254]) -> ([254]);
+felt252_add([254], [255]) -> ([256]);
+dup<felt252>([10]) -> ([10], [257]);
+store_temp<felt252>([256]) -> ([256]);
+felt252_add([256], [257]) -> ([258]);
+drop<felt252>([258]) -> ();
+dup<felt252>([10]) -> ([10], [259]);
+dup<felt252>([10]) -> ([10], [260]);
+store_temp<felt252>([259]) -> ([259]);
+felt252_add([259], [260]) -> ([261]);
+dup<felt252>([10]) -> ([10], [262]);
+store_temp<felt252>([261]) -> ([261]);
+felt252_add([261], [262]) -> ([263]);
+dup<felt252>([10]) -> ([10], [264]);
+store_temp<felt252>([263]) -> ([263]);
+felt252_add([263], [264]) -> ([265]);
+dup<felt252>([10]) -> ([10], [266]);
+store_temp<felt252>([265]) -> ([265]);
+felt252_add([265], [266]) -> ([267]);
+dup<felt252>([10]) -> ([10], [268]);
+store_temp<felt252>([267]) -> ([267]);
+felt252_add([267], [268]) -> ([269]);
+dup<felt252>([10]) -> ([10], [270]);
+store_temp<felt252>([269]) -> ([269]);
+felt252_add([269], [270]) -> ([271]);
+dup<felt252>([10]) -> ([10], [272]);
+store_temp<felt252>([271]) -> ([271]);
+felt252_add([271], [272]) -> ([273]);
+dup<felt252>([10]) -> ([10], [274]);
+store_temp<felt252>([273]) -> ([273]);
+felt252_add([273], [274]) -> ([275]);
+dup<felt252>([10]) -> ([10], [276]);
+store_temp<felt252>([275]) -> ([275]);
+felt252_add([275], [276]) -> ([277]);
+dup<felt252>([10]) -> ([10], [278]);
+store_temp<felt252>([277]) -> ([277]);
+felt252_add([277], [278]) -> ([279]);
+dup<felt252>([10]) -> ([10], [280]);
+store_temp<felt252>([279]) -> ([279]);
+felt252_add([279], [280]) -> ([281]);
+dup<felt252>([10]) -> ([10], [282]);
+store_temp<felt252>([281]) -> ([281]);
+felt252_add([281], [282]) -> ([283]);
+dup<felt252>([10]) -> ([10], [284]);
+store_temp<felt252>([283]) -> ([283]);
+felt252_add([283], [284]) -> ([285]);
+dup<felt252>([10]) -> ([10], [286]);
+store_temp<felt252>([285]) -> ([285]);
+felt252_add([285], [286]) -> ([287]);
+store_temp<felt252>([287]) -> ([287]);
+felt252_add([287], [10]) -> ([288]);
+drop<felt252>([288]) -> ();
+return();
+
+test::function_with_branch_align@F0([0]: core::bool) -> (felt252);
+test::foo@F1([0]: core::bool) -> ();
+
+//! > casm
+jmp rel 5 if [fp + -3] != 0;
+[ap + 0] = 2, ap++;
+ret;
+[ap + 0] = 1, ap++;
+ret;
+jmp rel 15 if [fp + -3] != 0;
+ap += 123;
+[ap + 0] = 0, ap++;
+call rel -14;
+[ap + 0] = [ap + -4], ap++;
+call rel -17;
+[ap + 0] = [ap + -8], ap++;
+call rel -20;
+ret;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+[ap + 0] = [ap + -1] + 1, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > coupons
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+extern fn coupon_buy<T>() -> T nopanic;
+impl DropCoupon of Drop<bar::Coupon>;
+
+fn foo(x: felt252) {
+    let c1: bar::Coupon = coupon_buy();
+    let _c2: bar::Coupon = coupon_buy();
+    let _c3: bar::Coupon = coupon_buy();
+    bar(__coupon__: c1);
+}
+
+#[inline(never)]
+fn bar() {
+    core::gas::redeposit_gas();
+}
+
+//! > enforced_costs
+test::bar 2000
+
+//! > gas_solution_lp
+#9: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 6300, Step: 6, Hole: 0, RangeCheck: 0})
+test::bar: SmallOrderedMap({Const: 2000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#9: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 1900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 6300, Step: 6, Hole: 0, RangeCheck: 0})
+test::bar: SmallOrderedMap({Const: 2000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+
+test::bar: 1
+test::foo: 4
+
+//! > ap_solution_linear
+
+test::foo: 4
+test::bar: 1
+
+//! > sierra_code
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+type Coupon<user@test::bar> = Coupon<user@test::bar> [storable: true, drop: true, dup: false, zero_sized: true];
+
+libfunc drop<felt252> = drop<felt252>;
+libfunc coupon_buy<Coupon<user@test::bar>> = coupon_buy<Coupon<user@test::bar>>;
+libfunc drop<Coupon<user@test::bar>> = drop<Coupon<user@test::bar>>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc coupon_call<user@test::bar> = coupon_call<user@test::bar>;
+libfunc redeposit_gas = redeposit_gas;
+
+F0:
+drop<felt252>([1]) -> ();
+coupon_buy<Coupon<user@test::bar>>() -> ([2]);
+coupon_buy<Coupon<user@test::bar>>() -> ([3]);
+drop<Coupon<user@test::bar>>([3]) -> ();
+coupon_buy<Coupon<user@test::bar>>() -> ([4]);
+drop<Coupon<user@test::bar>>([4]) -> ();
+store_temp<GasBuiltin>([0]) -> ([0]);
+coupon_call<user@test::bar>([0], [2]) -> ([5]);
+return([5]);
+F1:
+redeposit_gas([0]) -> ([1]);
+store_temp<GasBuiltin>([1]) -> ([1]);
+return([1]);
+
+test::foo@F0([0]: GasBuiltin, [1]: felt252) -> (GasBuiltin);
+test::bar@F1([0]: GasBuiltin) -> (GasBuiltin);
+
+//! > casm
+[ap + 0] = [fp + -4], ap++;
+call rel 3;
+ret;
+[ap + 0] = [fp + -3] + 1900, ap++;
+ret;
+
+//! > ==========================================================================
+
+//! > coupon refund
+
+//! > test_runner_name
+SmallE2ETestRunnerMetadataComputation
+
+//! > cairo_code
+extern fn coupon_refund<T>(c: T) nopanic;
+
+fn foo(c0: bar20000::Coupon, c1: bar20000::Coupon, c2: bar20000::Coupon) {
+    // Refund is fully used.
+    coupon_refund(c0);
+    bar20000();
+    bar20000();
+    core::gas::redeposit_gas(); // Zero redeposit.
+
+    // Refund more than used - rest is redeposited.
+    coupon_refund(c1);
+    bar1000();
+    core::gas::redeposit_gas();
+
+    // Refund more than used - rest is wasted.
+    coupon_refund(c2);
+    bar1000();
+}
+
+#[inline(never)]
+fn bar20000() nopanic {
+    core::gas::redeposit_gas();
+}
+
+#[inline(never)]
+fn bar1000() nopanic {
+    core::gas::redeposit_gas();
+}
+
+//! > enforced_costs
+test::bar20000 20000
+test::bar1000 1000
+
+//! > gas_solution_lp
+#0: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#4: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#8: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#9: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#13: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 19900, Step: 0, Hole: 0, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 43100, Step: 12, Hole: 0, RangeCheck: 0})
+test::bar20000: SmallOrderedMap({Const: 20000, Step: 1, Hole: 0, RangeCheck: 0})
+test::bar1000: SmallOrderedMap({Const: 1000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > gas_solution_linear
+#0: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#4: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#5: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 0, Step: 0, Hole: 0, RangeCheck: 0})
+#8: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 18700, Step: 0, Hole: 0, RangeCheck: 0})
+#9: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 18700, Step: 0, Hole: 0, RangeCheck: 0})
+#13: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 19900, Step: 0, Hole: 0, RangeCheck: 0})
+#16: SmallOrderedMap({Pedersen: 0, Poseidon: 0, Bitwise: 0, EcOp: 0, AddMod: 0, MulMod: 0, Blake: 0, Const: 900, Step: 0, Hole: 0, RangeCheck: 0})
+
+test::foo: SmallOrderedMap({Const: 20500, Step: 12, Hole: 0, RangeCheck: 0})
+test::bar20000: SmallOrderedMap({Const: 20000, Step: 1, Hole: 0, RangeCheck: 0})
+test::bar1000: SmallOrderedMap({Const: 1000, Step: 1, Hole: 0, RangeCheck: 0})
+
+//! > ap_solution_lp
+
+test::bar20000: 1
+test::bar1000: 1
+test::foo: 15
+
+//! > ap_solution_linear
+
+test::foo: 15
+test::bar20000: 1
+test::bar1000: 1
+
+//! > sierra_code
+type Coupon<user@test::bar20000> = Coupon<user@test::bar20000> [storable: true, drop: true, dup: false, zero_sized: true];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+
+libfunc coupon_refund<Coupon<user@test::bar20000>> = coupon_refund<Coupon<user@test::bar20000>>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc function_call<user@test::bar20000> = function_call<user@test::bar20000>;
+libfunc redeposit_gas = redeposit_gas;
+libfunc function_call<user@test::bar1000> = function_call<user@test::bar1000>;
+
+F0:
+coupon_refund<Coupon<user@test::bar20000>>([1]) -> ();
+store_temp<GasBuiltin>([0]) -> ([0]);
+function_call<user@test::bar20000>([0]) -> ([4]);
+function_call<user@test::bar20000>([4]) -> ([5]);
+redeposit_gas([5]) -> ([6]);
+coupon_refund<Coupon<user@test::bar20000>>([2]) -> ();
+store_temp<GasBuiltin>([6]) -> ([6]);
+function_call<user@test::bar1000>([6]) -> ([7]);
+redeposit_gas([7]) -> ([8]);
+coupon_refund<Coupon<user@test::bar20000>>([3]) -> ();
+store_temp<GasBuiltin>([8]) -> ([8]);
+function_call<user@test::bar1000>([8]) -> ([9]);
+return([9]);
+F1:
+redeposit_gas([0]) -> ([1]);
+store_temp<GasBuiltin>([1]) -> ([1]);
+return([1]);
+F2:
+redeposit_gas([0]) -> ([1]);
+store_temp<GasBuiltin>([1]) -> ([1]);
+return([1]);
+
+test::foo@F0([0]: GasBuiltin, [1]: Coupon<user@test::bar20000>, [2]: Coupon<user@test::bar20000>, [3]: Coupon<user@test::bar20000>) -> (GasBuiltin);
+test::bar20000@F1([0]: GasBuiltin) -> (GasBuiltin);
+test::bar1000@F2([0]: GasBuiltin) -> (GasBuiltin);
+
+//! > casm
+[ap + 0] = [fp + -3], ap++;
+call rel 12;
+call rel 10;
+[ap + 0] = [ap + -1], ap++;
+call rel 10;
+[ap + 0] = [ap + -1] + 18700, ap++;
+call rel 6;
+ret;
+[ap + 0] = [fp + -3] + 19900, ap++;
+ret;
+[ap + 0] = [fp + -3] + 900, ap++;
+ret;

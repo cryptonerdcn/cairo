@@ -16,14 +16,14 @@ pub fn build(
         NullableConcreteLibfunc::NullableFromBox(_) => {
             // Note that the pointer of the Box is never zero:
             // 1. If the size of the inner type is nonnegative, then values are written to the
-            //    memory address pointed by the pointer.
-            //    It follows that this address cannot be zero, since the Cairo-AIR guarantees that
-            //    all memory accesses have address >= 1.
-            // 2. If the size of the inner type is zero, then the pointer is set to 1.
-            //    see `build_into_box`.
+            //    memory address pointed by the pointer. It follows that this address cannot be
+            //    zero, since the Cairo-AIR guarantees that all memory accesses have address >= 1.
+            // 2. If the size of the inner type is zero, then the pointer is set to 1. see
+            //    `build_into_box`.
             build_identity(builder)
         }
         NullableConcreteLibfunc::MatchNullable(_) => build_nullable_match_nullable(builder),
+        NullableConcreteLibfunc::ForwardSnapshot(_) => build_identity(builder),
     }
 }
 
@@ -37,7 +37,7 @@ fn build_nullable_null(
     ))
 }
 
-/// Builds Casm instructions for the `null()` libfunc.
+/// Builds Casm instructions for the `match_nullable()` libfunc.
 fn build_nullable_match_nullable(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {

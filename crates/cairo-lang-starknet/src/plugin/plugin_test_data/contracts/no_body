@@ -1,0 +1,29 @@
+//! > Test expansion of a contract without body.
+
+//! > test_runner_name
+ExpandContractTestRunner(expect_diagnostics: true)
+
+//! > cairo_code
+#[starknet::contract]
+mod test_contract;
+
+//! > generated_cairo_code
+lib.cairo:
+
+#[starknet::contract]
+mod test_contract;
+
+//! > expected_diagnostics
+error[E2200]: Plugin diagnostic: Contracts without body are not supported.
+ --> lib.cairo:1:1-2:18
+  #[starknet::contract]
+ _^
+| mod test_contract;
+|__________________^
+
+error[E0005]: Module file not found. Expected path: test_contract.cairo
+ --> lib.cairo:1:1-2:18
+  #[starknet::contract]
+ _^
+| mod test_contract;
+|__________________^

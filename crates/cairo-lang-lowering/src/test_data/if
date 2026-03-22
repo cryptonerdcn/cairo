@@ -1,9 +1,9 @@
 //! > Test boolean if.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(a: bool, x: felt252) -> felt252 {
     if a {
         1
@@ -15,8 +15,6 @@ fn foo(a: bool, x: felt252) -> felt252 {
 //! > function_name
 foo
 
-//! > module_code
-
 //! > semantic_diagnostics
 
 //! > lowering_diagnostics
@@ -27,34 +25,29 @@ blk0 (root):
 Statements:
 End:
   Match(match_enum(v0) {
-    bool::False(v4) => blk1,
-    bool::True(v2) => blk2,
+    bool::False(v2) => blk1,
+    bool::True(v3) => blk2,
   })
 
 blk1:
 Statements:
 End:
-  Goto(blk3, {v1 -> v5})
+  Return(v1)
 
 blk2:
 Statements:
-  (v3: core::felt252) <- 1u
+  (v4: core::felt252) <- 1
 End:
-  Goto(blk3, {v3 -> v5})
-
-blk3:
-Statements:
-End:
-  Return(v5)
+  Return(v4)
 
 //! > ==========================================================================
 
 //! > Test if analyzer.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(x: felt252) -> felt252 {
     if x == 0 {
         1
@@ -66,8 +59,6 @@ fn foo(x: felt252) -> felt252 {
 //! > function_name
 foo
 
-//! > module_code
-
 //! > semantic_diagnostics
 
 //! > lowering_diagnostics
@@ -79,33 +70,28 @@ Statements:
 End:
   Match(match core::felt252_is_zero(v0) {
     IsZeroResult::Zero => blk1,
-    IsZeroResult::NonZero(v2) => blk2,
+    IsZeroResult::NonZero(v1) => blk2,
   })
 
 blk1:
 Statements:
-  (v1: core::felt252) <- 1u
+  (v2: core::felt252) <- 1
 End:
-  Goto(blk3, {v1 -> v3})
+  Return(v2)
 
 blk2:
 Statements:
 End:
-  Goto(blk3, {v0 -> v3})
-
-blk3:
-Statements:
-End:
-  Return(v3)
+  Return(v0)
 
 //! > ==========================================================================
 
 //! > Test if without else.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(x: felt252) -> felt252 {
     if 0 == x {
         return 10;
@@ -116,8 +102,6 @@ fn foo(x: felt252) -> felt252 {
 //! > function_name
 foo
 
-//! > module_code
-
 //! > semantic_diagnostics
 
 //! > lowering_diagnostics
@@ -126,32 +110,34 @@ foo
 Parameters: v0: core::felt252
 blk0 (root):
 Statements:
+  (v1: core::felt252) <- 0
+  (v2: core::felt252) <- core::felt252_sub(v1, v0)
 End:
-  Match(match core::felt252_is_zero(v0) {
+  Match(match core::felt252_is_zero(v2) {
     IsZeroResult::Zero => blk1,
-    IsZeroResult::NonZero(v2) => blk2,
+    IsZeroResult::NonZero(v3) => blk2,
   })
 
 blk1:
 Statements:
-  (v1: core::felt252) <- 10u
+  (v4: core::felt252) <- 10
 End:
-  Return(v1)
+  Return(v4)
 
 blk2:
 Statements:
-  (v3: core::felt252) <- 20u
+  (v5: core::felt252) <- 20
 End:
-  Return(v3)
+  Return(v5)
 
 //! > ==========================================================================
 
 //! > Test if x == y
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(x: felt252, y: felt252, z: felt252, w: felt252) -> felt252 {
     if x + y == z - w {
         0
@@ -163,8 +149,6 @@ fn foo(x: felt252, y: felt252, z: felt252, w: felt252) -> felt252 {
 //! > function_name
 foo
 
-//! > module_code
-
 //! > semantic_diagnostics
 
 //! > lowering_diagnostics
@@ -173,28 +157,986 @@ foo
 Parameters: v0: core::felt252, v1: core::felt252, v2: core::felt252, v3: core::felt252
 blk0 (root):
 Statements:
-  (v11: core::felt252) <- core::felt252_add(v0, v1)
-  (v12: core::felt252) <- core::felt252_sub(v2, v3)
-  (v13: core::felt252) <- core::felt252_sub(v11, v12)
+  (v4: core::felt252) <- core::felt252_add(v0, v1)
+  (v5: core::felt252) <- core::felt252_sub(v2, v3)
+  (v6: core::felt252) <- core::felt252_sub(v4, v5)
 End:
-  Match(match core::felt252_is_zero(v13) {
+  Match(match core::felt252_is_zero(v6) {
     IsZeroResult::Zero => blk1,
-    IsZeroResult::NonZero(v8) => blk2,
+    IsZeroResult::NonZero(v7) => blk2,
   })
 
 blk1:
 Statements:
-  (v7: core::felt252) <- 0u
+  (v8: core::felt252) <- 0
 End:
-  Goto(blk3, {v7 -> v10})
+  Return(v8)
 
 blk2:
 Statements:
-  (v9: core::felt252) <- 1u
+  (v9: core::felt252) <- 1
 End:
-  Goto(blk3, {v9 -> v10})
+  Return(v9)
+
+//! > ==========================================================================
+
+//! > Test if a == 0 || a = 5
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: felt252) -> felt252 {
+    if a == 0 || a == 5 {
+        0
+    } else {
+        1
+    }
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: core::felt252
+blk0 (root):
+Statements:
+End:
+  Match(match core::felt252_is_zero(v0) {
+    IsZeroResult::Zero => blk1,
+    IsZeroResult::NonZero(v1) => blk2,
+  })
+
+blk1:
+Statements:
+End:
+  Goto(blk4, {})
+
+blk2:
+Statements:
+  (v2: core::felt252) <- 5
+  (v3: core::felt252) <- core::felt252_sub(v0, v2)
+End:
+  Match(match core::felt252_is_zero(v3) {
+    IsZeroResult::Zero => blk3,
+    IsZeroResult::NonZero(v4) => blk5,
+  })
 
 blk3:
 Statements:
 End:
-  Return(v10)
+  Goto(blk4, {})
+
+blk4:
+Statements:
+  (v5: core::felt252) <- 0
+End:
+  Return(v5)
+
+blk5:
+Statements:
+  (v6: core::felt252) <- 1
+End:
+  Return(v6)
+
+//! > ==========================================================================
+
+//! > Test if let
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: MyEnum) -> felt252 {
+    if let MyEnum::A(x) = a {
+        x
+    } else {
+        0
+    }
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum MyEnum {
+    A: felt252,
+    B,
+    C,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: test::MyEnum
+blk0 (root):
+Statements:
+End:
+  Match(match_enum(v0) {
+    MyEnum::A(v1) => blk1,
+    MyEnum::B(v2) => blk2,
+    MyEnum::C(v3) => blk3,
+  })
+
+blk1:
+Statements:
+End:
+  Return(v1)
+
+blk2:
+Statements:
+End:
+  Goto(blk4, {})
+
+blk3:
+Statements:
+End:
+  Goto(blk4, {})
+
+blk4:
+Statements:
+  (v4: core::felt252) <- 0
+End:
+  Return(v4)
+
+//! > ==========================================================================
+
+//! > Test if let extern enum
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo() -> felt252 {
+    let mut y = 0;
+    if let MyEnum::A(x) = a() {
+        y = y + x
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum MyEnum {
+    A: felt252,
+    B,
+    C,
+}
+extern fn a() -> MyEnum nopanic;
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters:
+blk0 (root):
+Statements:
+  (v0: core::felt252) <- 0
+End:
+  Match(match test::a() {
+    MyEnum::A(v1) => blk1,
+    MyEnum::B => blk2,
+    MyEnum::C => blk3,
+  })
+
+blk1:
+Statements:
+End:
+  Goto(blk5, {v1 -> v2})
+
+blk2:
+Statements:
+End:
+  Goto(blk4, {})
+
+blk3:
+Statements:
+End:
+  Goto(blk4, {})
+
+blk4:
+Statements:
+End:
+  Goto(blk5, {v0 -> v2})
+
+blk5:
+Statements:
+  (v3: core::felt252) <- 1
+  (v4: core::felt252) <- core::felt252_add(v2, v3)
+End:
+  Return(v4)
+
+//! > ==========================================================================
+
+//! > Test if let tuple
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(z: felt252) -> felt252 {
+    let mut y = 0;
+    if let (MyEnum::A(x), true) = (a(), z == 6) {
+        y = y + x
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum MyEnum {
+    A: felt252,
+    B,
+    C,
+}
+extern fn a() -> MyEnum nopanic;
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: core::felt252
+blk0 (root):
+Statements:
+  (v1: core::felt252) <- 0
+  (v2: core::felt252) <- 6
+  (v3: core::felt252) <- core::felt252_sub(v0, v2)
+End:
+  Match(match core::felt252_is_zero(v3) {
+    IsZeroResult::Zero => blk1,
+    IsZeroResult::NonZero(v4) => blk2,
+  })
+
+blk1:
+Statements:
+  (v5: ()) <- struct_construct()
+  (v6: core::bool) <- bool::True(v5)
+End:
+  Goto(blk3, {v6 -> v7})
+
+blk2:
+Statements:
+  (v8: ()) <- struct_construct()
+  (v9: core::bool) <- bool::False(v8)
+End:
+  Goto(blk3, {v9 -> v7})
+
+blk3:
+Statements:
+End:
+  Match(match test::a() {
+    MyEnum::A(v10) => blk4,
+    MyEnum::B => blk7,
+    MyEnum::C => blk8,
+  })
+
+blk4:
+Statements:
+End:
+  Match(match_enum(v7) {
+    bool::False(v11) => blk5,
+    bool::True(v12) => blk6,
+  })
+
+blk5:
+Statements:
+End:
+  Goto(blk9, {})
+
+blk6:
+Statements:
+End:
+  Goto(blk10, {v10 -> v13})
+
+blk7:
+Statements:
+End:
+  Goto(blk9, {})
+
+blk8:
+Statements:
+End:
+  Goto(blk9, {})
+
+blk9:
+Statements:
+End:
+  Goto(blk10, {v1 -> v13})
+
+blk10:
+Statements:
+  (v14: core::felt252) <- 1
+  (v15: core::felt252) <- core::felt252_add(v13, v14)
+End:
+  Return(v15)
+
+//! > ==========================================================================
+
+//! > Test if let enum and numeric tuple
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(z: felt252) -> felt252 {
+    let mut y = 0;
+    if let (MyEnum::A(x), 3) = (a(), z) {
+        y = y + x
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum MyEnum {
+    A: felt252,
+    B,
+    C,
+}
+extern fn a() -> MyEnum nopanic;
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: core::felt252
+blk0 (root):
+Statements:
+  (v1: core::felt252) <- 0
+End:
+  Match(match test::a() {
+    MyEnum::A(v2) => blk1,
+    MyEnum::B => blk4,
+    MyEnum::C => blk5,
+  })
+
+blk1:
+Statements:
+  (v3: core::felt252) <- 3
+  (v4: core::felt252) <- core::felt252_sub(v0, v3)
+End:
+  Match(match core::felt252_is_zero(v4) {
+    IsZeroResult::Zero => blk2,
+    IsZeroResult::NonZero(v5) => blk3,
+  })
+
+blk2:
+Statements:
+End:
+  Goto(blk7, {v2 -> v6})
+
+blk3:
+Statements:
+End:
+  Goto(blk6, {})
+
+blk4:
+Statements:
+End:
+  Goto(blk6, {})
+
+blk5:
+Statements:
+End:
+  Goto(blk6, {})
+
+blk6:
+Statements:
+End:
+  Goto(blk7, {v1 -> v6})
+
+blk7:
+Statements:
+  (v7: core::felt252) <- 1
+  (v8: core::felt252) <- core::felt252_add(v6, v7)
+End:
+  Return(v8)
+
+//! > ==========================================================================
+
+//! > Test if let var only
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo() -> felt252 {
+    let mut y = 0;
+    if let x = y {
+        y = y + x
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters:
+blk0 (root):
+Statements:
+  (v0: core::felt252) <- 1
+End:
+  Return(v0)
+
+//! > ==========================================================================
+
+//! > Test if let underscore
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: MyEnum) -> felt252 {
+    let mut y = 0;
+    if let _ = a {
+        y = y + 5;
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Drop)]
+enum MyEnum {
+    A: felt252,
+    B,
+    C,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: test::MyEnum
+blk0 (root):
+Statements:
+  (v1: core::felt252) <- 6
+End:
+  Return(v1)
+
+//! > ==========================================================================
+
+//! > Test if let unreachable-else
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: true)
+
+//! > function_code
+fn foo(a: MyEnum) -> felt252 {
+    let mut y = 0;
+    if let _ = a {
+        y = y + 5;
+    } else {
+        y = y + 8;
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Drop)]
+enum MyEnum {
+    A: felt252,
+    B,
+    C,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+warning[E3004]: Unreachable clause.
+ --> lib.cairo:11:12-13:5
+      } else {
+ ____________^
+|         y = y + 8;
+|     }
+|_____^
+
+//! > lowering_flat
+Parameters: v0: test::MyEnum
+blk0 (root):
+Statements:
+  (v1: core::felt252) <- 6
+End:
+  Return(v1)
+
+//! > ==========================================================================
+
+//! > Test if let unsupported type
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: true)
+
+//! > function_code
+fn foo(a: [u16; 2]) -> felt252 {
+    let mut y = 0;
+    if let [_, _] = a {
+        y = y + 5;
+    } else {
+        y = y + 8;
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Drop)]
+struct MyStruct {
+    A: felt252,
+    B: felt252,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+error[E3004]: Unsupported type in if-let. Type: `[core::integer::u16; 2]`.
+ --> lib.cairo:8:12
+    if let [_, _] = a {
+           ^^^^^^
+
+//! > lowering_flat
+<Failed lowering function - run with RUST_LOG=warn (or less) to see diagnostics>
+
+//! > ==========================================================================
+
+//! > Test if let in loop
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: MyEnum) -> felt252 {
+    loop {
+        // Some statements to prevent the loop function from being inlined.
+        let mut x = 0;
+        x += 1;
+        x += 1;
+        x += 1;
+        x += 1;
+        x += 1;
+        x += 1;
+        x += 1;
+        x += 1;
+        if let _ = a {
+            break 2;
+        }
+    }
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Drop, Copy)]
+enum MyEnum {
+    A: felt252,
+    B: felt252,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: test::MyEnum
+blk0 (root):
+Statements:
+  (v1: core::felt252) <- 2
+End:
+  Return(v1)
+
+//! > ==========================================================================
+
+//! > Test if let unreachable-else by multipattern
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: true)
+
+//! > function_code
+fn foo(a: Option<felt252>) -> felt252 {
+    let mut y = 0;
+    if let None | Some(_) = a {
+        y = y + 5;
+    } else {
+        y = y + 8;
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+warning[E3004]: Unreachable clause.
+ --> lib.cairo:5:12-7:5
+      } else {
+ ____________^
+|         y = y + 8;
+|     }
+|_____^
+
+//! > lowering_flat
+Parameters: v0: core::option::Option::<core::felt252>
+blk0 (root):
+Statements:
+  (v1: core::felt252) <- 6
+End:
+  Return(v1)
+
+//! > ==========================================================================
+
+//! > Test if let multipattern multilevel enum
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: Option<Result<felt252, felt252>>) -> felt252 {
+    let mut y = 0;
+    if let Some(Err(v)) | Some(Ok(v)) = a {
+        y = y + v;
+    } else {
+        y = y + 8;
+    }
+    y = y + 1;
+    return y;
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: core::option::Option::<core::result::Result::<core::felt252, core::felt252>>
+blk0 (root):
+Statements:
+End:
+  Match(match_enum(v0) {
+    Option::Some(v1) => blk1,
+    Option::None(v2) => blk5,
+  })
+
+blk1:
+Statements:
+End:
+  Match(match_enum(v1) {
+    Result::Ok(v3) => blk2,
+    Result::Err(v4) => blk3,
+  })
+
+blk2:
+Statements:
+End:
+  Goto(blk4, {v3 -> v5})
+
+blk3:
+Statements:
+End:
+  Goto(blk4, {v4 -> v5})
+
+blk4:
+Statements:
+End:
+  Goto(blk6, {v5 -> v6})
+
+blk5:
+Statements:
+  (v7: core::felt252) <- 8
+End:
+  Goto(blk6, {v7 -> v6})
+
+blk6:
+Statements:
+  (v8: core::felt252) <- 1
+  (v9: core::felt252) <- core::felt252_add(v6, v8)
+End:
+  Return(v9)
+
+//! > ==========================================================================
+
+//! > Test if let with multiple conditions
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: Option<Option<Option<felt252>>>, x: felt252) -> felt252 {
+    if let Some(b) = a && let Some(c) = b && x == 3 && let Some(d) = c {
+        return d;
+    }
+    return 0;
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: core::option::Option::<core::option::Option::<core::option::Option::<core::felt252>>>, v1: core::felt252
+blk0 (root):
+Statements:
+End:
+  Match(match_enum(v0) {
+    Option::Some(v2) => blk1,
+    Option::None(v3) => blk8,
+  })
+
+blk1:
+Statements:
+End:
+  Match(match_enum(v2) {
+    Option::Some(v4) => blk2,
+    Option::None(v5) => blk7,
+  })
+
+blk2:
+Statements:
+  (v6: core::felt252) <- 3
+  (v7: core::felt252) <- core::felt252_sub(v1, v6)
+End:
+  Match(match core::felt252_is_zero(v7) {
+    IsZeroResult::Zero => blk3,
+    IsZeroResult::NonZero(v8) => blk6,
+  })
+
+blk3:
+Statements:
+End:
+  Match(match_enum(v4) {
+    Option::Some(v9) => blk4,
+    Option::None(v10) => blk5,
+  })
+
+blk4:
+Statements:
+End:
+  Return(v9)
+
+blk5:
+Statements:
+End:
+  Goto(blk9, {})
+
+blk6:
+Statements:
+End:
+  Goto(blk9, {})
+
+blk7:
+Statements:
+End:
+  Goto(blk9, {})
+
+blk8:
+Statements:
+End:
+  Goto(blk9, {})
+
+blk9:
+Statements:
+  (v11: core::felt252) <- 0
+End:
+  Return(v11)
+
+//! > ==========================================================================
+
+//! > Test if let with multiple conditions - with else block
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: Option<Option<felt252>>) -> felt252 {
+    if let Some(b) = a && let Some(c) = b {
+        c
+    } else {
+        0
+    }
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: core::option::Option::<core::option::Option::<core::felt252>>
+blk0 (root):
+Statements:
+End:
+  Match(match_enum(v0) {
+    Option::Some(v1) => blk1,
+    Option::None(v2) => blk4,
+  })
+
+blk1:
+Statements:
+End:
+  Match(match_enum(v1) {
+    Option::Some(v3) => blk2,
+    Option::None(v4) => blk3,
+  })
+
+blk2:
+Statements:
+End:
+  Return(v3)
+
+blk3:
+Statements:
+End:
+  Goto(blk5, {})
+
+blk4:
+Statements:
+End:
+  Goto(blk5, {})
+
+blk5:
+Statements:
+  (v5: core::felt252) <- 0
+End:
+  Return(v5)
+
+//! > ==========================================================================
+
+//! > Non-droppable enum
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: true)
+
+//! > function_code
+fn foo(a: MyEnum, b: MyEnum, c: MyEnum2, d: MyEnum2, e: MyEnum3) {
+    // TODO(lior): Fix the locations in this test.
+    if let MyEnum::A(_x) = a {}
+    // If the variable is not bound, the match is skipped, which leads to an error.
+    if let MyEnum::A(_) = b {}
+    // If there are two variants, the match is forced. In this case, the error is due to the inner
+    // value not being dropped. Test with and without binding.
+    if let MyEnum2::B(_x) = c {}
+    if let MyEnum2::B(_) = d {}
+    // Three levels of nesting. Both MyEnum2::B and MyEnum2::C are not dropped.
+    if let MyEnum3::D(MyEnum2::B(_)) = e {}
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum MyEnum {
+    A: felt252,
+}
+
+struct NonDroppable {}
+
+enum MyEnum2 {
+    B: MyEnum,
+    C: NonDroppable,
+}
+
+enum MyEnum3 {
+    D: MyEnum2,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+error[E3002]: Variable not dropped.
+ --> lib.cairo:25:34
+    if let MyEnum3::D(MyEnum2::B(_)) = e {}
+                                 ^
+note: Trait has no implementation in context: core::traits::Drop::<test::MyEnum>.
+note: Trait has no implementation in context: core::traits::Destruct::<test::MyEnum>.
+
+error[E3002]: Variable not dropped.
+ --> lib.cairo:25:23
+    if let MyEnum3::D(MyEnum2::B(_)) = e {}
+                      ^^^^^^^^^^^^^
+note: In variant MyEnum2::C.
+note: Trait has no implementation in context: core::traits::Drop::<test::NonDroppable>.
+note: Trait has no implementation in context: core::traits::Destruct::<test::NonDroppable>.
+
+error[E3002]: Variable not dropped.
+ --> lib.cairo:23:23
+    if let MyEnum2::B(_) = d {}
+                      ^
+note: Trait has no implementation in context: core::traits::Drop::<test::MyEnum>.
+note: Trait has no implementation in context: core::traits::Destruct::<test::MyEnum>.
+
+error[E3002]: Variable not dropped.
+ --> lib.cairo:23:28
+    if let MyEnum2::B(_) = d {}
+                           ^
+note: In variant MyEnum2::C.
+note: Trait has no implementation in context: core::traits::Drop::<test::NonDroppable>.
+note: Trait has no implementation in context: core::traits::Destruct::<test::NonDroppable>.
+
+error[E3002]: Variable not dropped.
+ --> lib.cairo:22:23
+    if let MyEnum2::B(_x) = c {}
+                      ^^
+note: Trait has no implementation in context: core::traits::Drop::<test::MyEnum>.
+note: Trait has no implementation in context: core::traits::Destruct::<test::MyEnum>.
+
+error[E3002]: Variable not dropped.
+ --> lib.cairo:22:29
+    if let MyEnum2::B(_x) = c {}
+                            ^
+note: In variant MyEnum2::C.
+note: Trait has no implementation in context: core::traits::Drop::<test::NonDroppable>.
+note: Trait has no implementation in context: core::traits::Destruct::<test::NonDroppable>.
+
+error[E3002]: Variable not dropped.
+ --> lib.cairo:15:19
+fn foo(a: MyEnum, b: MyEnum, c: MyEnum2, d: MyEnum2, e: MyEnum3) {
+                  ^
+note: Trait has no implementation in context: core::traits::Drop::<test::MyEnum>.
+note: Trait has no implementation in context: core::traits::Destruct::<test::MyEnum>.
+
+//! > lowering_flat
+<Failed lowering function - run with RUST_LOG=warn (or less) to see diagnostics>

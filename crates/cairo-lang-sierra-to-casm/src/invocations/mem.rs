@@ -2,7 +2,7 @@ use cairo_lang_casm::ap_change::ApplyApChange;
 use cairo_lang_casm::cell_expression::{CellExpression, CellOperator};
 use cairo_lang_casm::instructions::Instruction;
 use cairo_lang_casm::operand::{CellRef, Register};
-use cairo_lang_casm::{casm, casm_extend};
+use cairo_lang_casm::{casm, casm_extend, cell_ref};
 use cairo_lang_sierra::extensions::lib_func::SignatureAndTypeConcreteLibfunc;
 use cairo_lang_sierra::extensions::mem::MemConcreteLibfunc;
 use cairo_lang_sierra::ids::ConcreteTypeId;
@@ -10,7 +10,7 @@ use cairo_lang_utils::casts::IntoOrPanic;
 use cairo_lang_utils::extract_matches;
 use itertools::{repeat_n, zip_eq};
 
-use super::{misc, CompiledInvocation, CompiledInvocationBuilder, InvocationError};
+use super::{CompiledInvocation, CompiledInvocationBuilder, InvocationError, misc};
 use crate::environment::frame_state;
 use crate::references::ReferenceExpression;
 
@@ -34,7 +34,7 @@ pub fn build(
     }
 }
 
-/// Adds a single instruction to a casm context.
+/// Adds a single instruction to a CASM context.
 macro_rules! add_instruction {
     ($ctx:ident, $($tok:tt)*) => {{
         casm_extend! {$ctx, $($tok)* ;}
@@ -57,8 +57,8 @@ fn get_store_instructions<DstCells: Iterator<Item = CellRef>>(
     }
     let mut ctx = casm!();
     let mut ap_change = 0;
-    for (dst, cell_expr_orig) in zip_eq(dst_cells, &src_expr.cells) {
-        let cell_expr = cell_expr_orig.clone().apply_known_ap_change(ap_change as usize).unwrap();
+    for (dst, mut cell_expr) in zip_eq(dst_cells, src_expr.cells.iter().cloned()) {
+        assert!(cell_expr.apply_known_ap_change(ap_change));
         match cell_expr {
             CellExpression::Deref(operand) => add_instruction!(ctx, dst = operand),
             CellExpression::DoubleDeref(operand, offset) => {
@@ -93,7 +93,7 @@ fn build_store_temp(
     let instructions = get_store_instructions(
         &builder,
         ty,
-        repeat_n(CellRef { register: Register::AP, offset: 0 }, type_size as usize),
+        repeat_n(cell_ref!([ap]), type_size as usize),
         expression,
     )?;
     Ok(builder.build(
@@ -158,9 +158,7 @@ fn build_alloc_local(
     Ok(builder.build_only_reference_changes(
         [ReferenceExpression {
             cells: (0..allocation_size)
-                .map(|i| {
-                    CellExpression::Deref(CellRef { register: Register::FP, offset: slot + i })
-                })
+                .map(|i| CellExpression::Deref(cell_ref!([fp + (slot + i)])))
                 .collect(),
         }]
         .into_iter(),

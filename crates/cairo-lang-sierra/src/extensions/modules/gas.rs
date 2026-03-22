@@ -1,5 +1,7 @@
+use cairo_lang_utils::small_ordered_map::SmallOrderedMap;
 use convert_case::Casing;
 use itertools::chain;
+use serde::{Deserialize, Serialize};
 
 use super::int::unsigned128::Uint128Type;
 // Module providing the gas related extensions.
@@ -31,6 +33,7 @@ define_libfunc_hierarchy! {
         WithdrawGas(WithdrawGasLibfunc),
         RedepositGas(RedepositGasLibfunc),
         GetAvailableGas(GetAvailableGasLibfunc),
+        GetUnspentGas(GetUnspentGasLibfunc),
         BuiltinWithdrawGas(BuiltinCostWithdrawGasLibfunc),
         GetBuiltinCosts(BuiltinCostGetBuiltinCostsLibfunc),
     }, GasConcreteLibfunc
@@ -48,7 +51,7 @@ impl NoGenericArgsGenericLibfunc for WithdrawGasLibfunc {
     ) -> Result<LibfuncSignature, SpecializationError> {
         let gas_builtin_type = context.get_concrete_type(GasBuiltinType::id(), &[])?;
         let range_check_type = context.get_concrete_type(RangeCheckType::id(), &[])?;
-        let rc_output_info = OutputVarInfo::new_builtin(range_check_type.clone(), 0);
+        let rc_output_info = OutputVarInfo::new_builtin(range_check_type.clone());
         Ok(LibfuncSignature {
             param_signatures: vec![
                 ParamSignature::new(range_check_type).with_allow_add_const(),
@@ -133,45 +136,111 @@ impl NoGenericArgsGenericLibfunc for GetAvailableGasLibfunc {
     }
 }
 
-/// Represents different type of costs.
+/// Libfunc for returning the amount of available gas, including gas in local wallet.
+#[derive(Default)]
+pub struct GetUnspentGasLibfunc {}
+impl NoGenericArgsGenericLibfunc for GetUnspentGasLibfunc {
+    const STR_ID: &'static str = "get_unspent_gas";
+
+    fn specialize_signature(
+        &self,
+        context: &dyn SignatureSpecializationContext,
+    ) -> Result<LibfuncSignature, SpecializationError> {
+        let gas_builtin_type = context.get_concrete_type(GasBuiltinType::id(), &[])?;
+        Ok(LibfuncSignature::new_non_branch(
+            vec![gas_builtin_type.clone()],
+            vec![
+                OutputVarInfo {
+                    ty: gas_builtin_type,
+                    ref_info: OutputVarReferenceInfo::SameAsParam { param_idx: 0 },
+                },
+                OutputVarInfo {
+                    ty: context.get_concrete_type(Uint128Type::id(), &[])?,
+                    ref_info: OutputVarReferenceInfo::SimpleDerefs,
+                },
+            ],
+            SierraApChange::Known { new_vars_only: false },
+        ))
+    }
+}
+
+/// A mapping from const tokens to some value.
+///
+/// This would be the recommended mapping with `CostTokenType` as key.
+pub type CostTokenMap<Value> = SmallOrderedMap<CostTokenType, Value>;
+
+/// Represents different types of costs.
 /// Note that if you add a type here you should update 'iter_precost'
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CostTokenType {
-    /// A compile time known cost unit.
+    /// A compile time known cost unit. This is a linear combination of the runtime tokens
+    /// ([CostTokenType::Step], [CostTokenType::Hole], [CostTokenType::RangeCheck],
+    /// [CostTokenType::RangeCheck96]).
     Const,
+
+    // Runtime post-cost token types:
+    /// The number of steps.
+    Step,
+    /// The number of memory holes (untouched memory addresses).
+    Hole,
+    /// The number of 128-bit range check builtins.
+    RangeCheck,
+    /// The number of 96-bit range check builtins.
+    RangeCheck96,
+
+    // Pre-cost token types (builtins):
     /// One invocation of the pedersen hash function.
     Pedersen,
-    /// One invocation of the Posedion hades perumuation.
+    /// One invocation of the Poseidon hades permutation.
     Poseidon,
     /// One invocation of the bitwise builtin.
     Bitwise,
     /// One invocation of the EC op builtin.
     EcOp,
+    // Add mod builtin.
+    AddMod,
+    // mul mod builtin.
+    MulMod,
+    /// One invocation of the Blake hash function.
+    Blake,
 }
 impl CostTokenType {
-    pub fn iter()
-    -> std::iter::Chain<std::slice::Iter<'static, Self>, std::slice::Iter<'static, Self>> {
-        chain!(Self::iter_precost(), [CostTokenType::Const].iter())
-    }
-
+    /// Iterates over the pre-cost token types.
     pub fn iter_precost() -> std::slice::Iter<'static, Self> {
         [
             CostTokenType::Pedersen,
             CostTokenType::Poseidon,
             CostTokenType::Bitwise,
             CostTokenType::EcOp,
+            CostTokenType::AddMod,
+            CostTokenType::MulMod,
+            CostTokenType::Blake,
         ]
         .iter()
+    }
+
+    /// Iterates over the tokens that are used in the Sierra->Casm compilation (pre-cost token types
+    /// and [CostTokenType::Const]).
+    pub fn iter_casm_tokens()
+    -> std::iter::Chain<std::slice::Iter<'static, Self>, std::slice::Iter<'static, Self>> {
+        chain!(Self::iter_precost(), [CostTokenType::Const].iter())
     }
 
     /// Returns the name of the token type, in snake_case.
     pub fn name(&self) -> String {
         match self {
             CostTokenType::Const => "const",
+            CostTokenType::Step => "step",
+            CostTokenType::Hole => "hole",
+            CostTokenType::RangeCheck => "range_check",
+            CostTokenType::RangeCheck96 => "range_check96",
+            CostTokenType::Blake => "blake",
             CostTokenType::Pedersen => "pedersen",
             CostTokenType::Bitwise => "bitwise",
             CostTokenType::EcOp => "ec_op",
             CostTokenType::Poseidon => "poseidon",
+            CostTokenType::AddMod => "add_mod",
+            CostTokenType::MulMod => "mul_mod",
         }
         .into()
     }
@@ -182,13 +251,22 @@ impl CostTokenType {
 
     pub fn offset_in_builtin_costs(&self) -> i16 {
         match self {
-            CostTokenType::Const => {
+            CostTokenType::Const
+            | CostTokenType::Step
+            | CostTokenType::Hole
+            | CostTokenType::RangeCheck
+            | CostTokenType::RangeCheck96 => {
                 panic!("offset_in_builtin_costs is not supported for '{}'.", self.camel_case_name())
             }
+
             CostTokenType::Pedersen => 0,
             CostTokenType::Bitwise => 1,
             CostTokenType::EcOp => 2,
             CostTokenType::Poseidon => 3,
+            // TODO(ilya): Update the actual table.
+            CostTokenType::AddMod => 4,
+            CostTokenType::MulMod => 5,
+            CostTokenType::Blake => 6,
         }
     }
 }
@@ -206,27 +284,33 @@ impl NoGenericArgsGenericType for BuiltinCostsType {
     const DROPPABLE: bool = true;
     const ZERO_SIZED: bool = false;
 }
-
-/// Libfunc for withdrawing gas to be used by a builtin.
-#[derive(Default)]
-pub struct BuiltinCostWithdrawGasLibfunc;
-impl BuiltinCostWithdrawGasLibfunc {
+impl BuiltinCostsType {
     /// Returns the number of steps required for the computation of the requested cost, given the
-    /// number of requested token usages. The number of steps is also the change in `ap` (every
-    /// step includes `ap++`).
+    /// number of requested token usages. The number of steps is also the change in `ap`.
+    /// If `table_available` is false, the number of steps includes the cost of fetching the builtin
+    /// cost table.
     pub fn cost_computation_steps<TokenUsages: Fn(CostTokenType) -> usize>(
+        table_available: bool,
         token_usages: TokenUsages,
     ) -> usize {
-        CostTokenType::iter_precost()
+        let calculation_steps = CostTokenType::iter_precost()
             .map(|token_type| match token_usages(*token_type) {
                 0 => 0,
                 1 => 2,
                 _ => 3,
             })
-            .sum()
+            .sum();
+        if calculation_steps > 0 && !table_available {
+            calculation_steps + 4
+        } else {
+            calculation_steps
+        }
     }
 }
 
+/// Libfunc for withdrawing gas to be used by a builtin.
+#[derive(Default)]
+pub struct BuiltinCostWithdrawGasLibfunc;
 impl NoGenericArgsGenericLibfunc for BuiltinCostWithdrawGasLibfunc {
     const STR_ID: &'static str = "withdraw_gas_all";
 
@@ -237,7 +321,7 @@ impl NoGenericArgsGenericLibfunc for BuiltinCostWithdrawGasLibfunc {
         let gas_builtin_type = context.get_concrete_type(GasBuiltinType::id(), &[])?;
         let range_check_type = context.get_concrete_type(RangeCheckType::id(), &[])?;
         let builtin_costs_type = context.get_concrete_type(BuiltinCostsType::id(), &[])?;
-        let rc_output_info = OutputVarInfo::new_builtin(range_check_type.clone(), 0);
+        let rc_output_info = OutputVarInfo::new_builtin(range_check_type.clone());
         Ok(LibfuncSignature {
             param_signatures: vec![
                 ParamSignature::new(range_check_type).with_allow_add_const(),

@@ -3,10 +3,10 @@
 //! > test_runner_name
 test_function_diagnostics
 
-//! > function
-fn foo(a: A::<felt252>) -> felt252 {
+//! > function_code
+fn foo(a: A<felt252>) -> felt252 {
     match a {
-        A::Variant0(t) => {t}
+        A::Variant0(t) => { t },
     }
 }
 
@@ -15,7 +15,181 @@ foo
 
 //! > module_code
 enum A<T> {
-    Variant0: T
+    Variant0: T,
 }
 
 //! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Test invalid recursive enum.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+enum A {
+    Variant: A,
+}
+
+//! > expected_diagnostics
+error[E2052]: Recursive type "test::A" has infinite size.
+ --> lib.cairo:2:5
+    Variant: A,
+    ^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test phantom recursive enum.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+#[phantom]
+enum A {
+    Variant: A,
+}
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Test enum containing phantom.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+#[phantom]
+struct A {}
+
+enum B {
+    Variant: A,
+}
+
+//! > expected_diagnostics
+error[E2020]: Non-phantom type containing phantom type.
+ --> lib.cairo:5:5
+    Variant: A,
+    ^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test enum with empty array.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+enum A {
+    Variant: Array<()>,
+}
+
+//! > expected_diagnostics
+error[E2053]: Cannot have array of type "()" that is zero sized.
+ --> lib.cairo:2:5
+    Variant: Array<()>,
+    ^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test generic params conflicts with enum.
+
+//! > test_runner_name
+test_function_diagnostics
+
+//! > function_code
+fn foo() {}
+fn bar<E>() -> i32 {
+    let E::aa(b) = makeE();
+    b
+}
+fn makeE() -> E {
+    E::aa(3)
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum E {
+    aa: i32,
+}
+
+//! > expected_diagnostics
+error[E2086]: Invalid path.
+ --> lib.cairo:6:12
+    let E::aa(b) = makeE();
+           ^^
+
+error[E0006]: Identifier not found.
+ --> lib.cairo:7:5
+    b
+    ^
+
+//! > ==========================================================================
+
+//! > Test generic params conflicts with enum variants.
+
+//! > test_runner_name
+test_function_diagnostics
+
+//! > function_code
+fn foo() {}
+fn bar<T, E>() -> i32 {
+    let T(a) = A::T(2);
+    let E = A::E(());
+
+    a
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum A {
+    T: i32,
+    E: (),
+}
+use A::{E, T};
+
+//! > expected_diagnostics
+error[E2009]: Not a variant. Use the full name Enum::Variant.
+ --> lib.cairo:8:9
+    let T(a) = A::T(2);
+        ^
+
+error[E0006]: Identifier not found.
+ --> lib.cairo:11:5
+    a
+    ^
+
+warning[E0001]: Unused variable. Consider ignoring by prefixing with `_`.
+ --> lib.cairo:9:9
+    let E = A::E(());
+        ^

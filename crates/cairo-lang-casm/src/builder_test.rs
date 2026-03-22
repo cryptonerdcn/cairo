@@ -1,3 +1,6 @@
+#[cfg(not(feature = "std"))]
+use alloc::format;
+
 use indoc::indoc;
 use itertools::join;
 use pretty_assertions::assert_eq;
@@ -118,7 +121,7 @@ fn test_allocations() {
 
 #[test]
 #[should_panic]
-fn test_allocations_not_enough_commands() {
+fn should_panic_test_allocations_not_enough_commands() {
     let mut builder = CasmBuilder::default();
     casm_build_extend! {builder,
         tempvar a;
@@ -158,7 +161,7 @@ fn test_aligned_branch_intersect() {
 
 #[test]
 #[should_panic]
-fn test_unaligned_branch_intersect() {
+fn should_panic_test_unaligned_branch_intersect() {
     let mut builder = CasmBuilder::default();
     let var = builder.add_var(CellExpression::from_res_operand(res!([ap + 7])));
     casm_build_extend! {builder,
@@ -185,6 +188,7 @@ fn test_calculation_loop() {
         tempvar b = one;
         rescope{a = a, b = b, n = n, one = one};
         FIB:
+        #{ steps = 0; }
         tempvar new_n = n - one;
         tempvar new_b = a + b;
         rescope{a = b, b = new_b, n = new_n, one = one};
@@ -225,6 +229,7 @@ fn test_call_ret() {
         assert res_b = fib11;
         jump FT;
         FIB:
+        #{ steps = 0; }
         tempvar new_a = b;
         tempvar new_n = n - one;
         tempvar new_b = a + b;
@@ -275,6 +280,7 @@ fn test_local_fib() {
         tempvar b = one;
         rescope{a = a, b = b, n = n, one = one, res = res};
         FIB:
+        #{ steps = 0; }
         tempvar new_n = n - one;
         tempvar new_b = a + b;
         rescope{a = b, b = new_b, n = new_n, one = one, res = res};
@@ -346,6 +352,27 @@ fn test_fail() {
             [ap + 0] = 3, ap++;
             jmp rel 4 if [ap + -1] != 0;
             [fp + -1] = [fp + -1] + 1;
+        "}
+    );
+}
+
+#[test]
+fn test_future_label() {
+    let mut builder = CasmBuilder::default();
+    casm_build_extend! {builder,
+        const value = 1000;
+        tempvar var = value;
+        jump FAR_AWAY if var != 0;
+    };
+    builder.future_label("FAR_AWAY", 100);
+    let CasmBuildResult { instructions, branches: [(_, awaiting_relocations)] } =
+        builder.build(["Fallthrough"]);
+    assert!(awaiting_relocations.is_empty());
+    assert_eq!(
+        join(instructions.iter().map(|inst| format!("{inst};\n")), ""),
+        indoc! {"
+            [ap + 0] = 1000, ap++;
+            jmp rel 102 if [ap + -1] != 0;
         "}
     );
 }

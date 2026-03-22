@@ -1,0 +1,337 @@
+//! > Negative impls
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo(a: u8) -> Option<u8> {
+    let b: Option<u8> = a.try_into();
+    b
+}
+
+//! > function_name
+foo
+
+//! > module_code
+use core::traits::TryInto;
+pub trait DowncastableInt<Type>;
+
+impl DowncastableIntU8 of DowncastableInt<u8> {}
+
+pub trait TypeEq<S, T> {}
+
+impl ImplTypeEq<T> of TypeEq<T, T> {}
+
+impl DowncastableTryInto<
+    From, To, +DowncastableInt<From>, +DowncastableInt<To>, -TypeEq<From, To>,
+> of TryInto<From, To> {
+    fn try_into(self: From) -> Option<To> {
+        core::integer::downcast(self)
+    }
+}
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Negative impls with generic args.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(a: u8) -> u8 {
+    bar(a)
+}
+
+//! > function_name
+foo
+
+//! > module_code
+trait MyTrait<T> {
+    fn f(t: T) -> T;
+}
+impl MyImpl<T, -Drop<T>> of MyTrait<T> {
+    fn f(t: T) -> T {
+        t
+    }
+}
+
+fn bar<T>(t: T) -> T {
+    MyTrait::f(t)
+}
+
+//! > expected_diagnostics
+error[E2311]: Trait has no implementation in context: test::MyTrait::<T>.
+ --> lib.cairo:11:14
+    MyTrait::f(t)
+             ^
+
+//! > ==========================================================================
+
+//! > Test negative impls infer impl with existing negative impl.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() -> u32 {
+    MyTrait2::foo(5_u32)
+}
+
+//! > function_name
+foo
+
+//! > module_code
+pub trait MyTrait<T> {}
+
+impl I of MyTrait<u32> {}
+
+pub trait MyTrait2<T> {
+    fn foo(self: T) -> T;
+}
+
+impl I2<T, -MyTrait<T>> of MyTrait2<T> {
+    fn foo(self: T) -> T {
+        self
+    }
+}
+
+//! > expected_diagnostics
+error[E2311]: Trait has no implementation in context: test::MyTrait2::<core::integer::u32>.
+ --> lib.cairo:15:15
+    MyTrait2::foo(5_u32)
+              ^^^
+
+//! > ==========================================================================
+
+//! > Test negative impls use impl with existing negative impl.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() -> u32 {
+    I2::foo(5_u32)
+}
+
+//! > function_name
+foo
+
+//! > module_code
+pub trait MyTrait<T> {}
+
+impl I of MyTrait<u32> {}
+
+pub trait MyTrait2<T> {
+    fn foo(self: T) -> T;
+}
+
+impl I2<T, -MyTrait<T>> of MyTrait2<T> {
+    fn foo(self: T) -> T {
+        self
+    }
+}
+
+//! > expected_diagnostics
+error[E2312]: Trait has implementation in context: test::MyTrait::<core::integer::u32>.
+ --> lib.cairo:15:5
+    I2::foo(5_u32)
+    ^^
+
+//! > ==========================================================================
+
+//! > Test negative impls infer impl with generic param.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+pub trait Consumer<T> {
+    fn consume(self: T, input: u32);
+    fn bar(x: T);
+}
+
+pub trait Producer<T> {
+    fn produce(self: T) -> u32;
+}
+
+pub struct ProducerType {}
+
+impl ProducerImpl of Producer<ProducerType> {
+    fn produce(self: ProducerType) -> u32 {
+        3_u32
+    }
+}
+
+impl TConsumerImpl<T, +core::fmt::Debug<T>, +Drop<T>, -Producer<T>> of Consumer<T> {
+    fn consume(self: T, input: u32) {
+        println!("{:?} consumed value: {}", self, input);
+    }
+    fn bar(x: T) {
+        let producer = ProducerType {};
+
+        let production = producer.produce();
+        Consumer::consume(x, production);
+    }
+}
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Test negative impls infer negative impl
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    Trait3::bar();
+}
+
+//! > function_name
+foo
+
+//! > module_code
+trait Trait<T> {}
+
+impl I of Trait<u32> {}
+
+trait Trait2 {
+    fn foo();
+}
+
+impl Unusable<-Trait<u32>> of Trait2 {
+    fn foo() {}
+}
+
+trait Trait3 {
+    fn bar();
+}
+
+impl I3<-Trait<u32>> of Trait3 {
+    fn bar() {
+        // The following line works because `I3` has the same negative impl as `Unusable`.
+        Trait2::foo();
+    }
+}
+
+//! > expected_diagnostics
+error[E2311]: Trait has no implementation in context: test::Trait3.
+ --> lib.cairo:24:13
+    Trait3::bar();
+            ^^^
+
+//! > ==========================================================================
+
+//! > Test negative impl failure with generic fixed size array.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {
+    bar::<felt252>();
+}
+
+//! > function_name
+foo
+
+//! > module_code
+use core::metaprogramming::TypeEqual;
+trait MyTrait {
+    fn f();
+}
+
+impl MyImpl<T, const SIZE: usize, -TypeEqual<[T; SIZE], [T; 0]>> of MyTrait {
+    #[inline]
+    fn f() {}
+}
+
+fn bar<T>() {
+    MyImpl::<T, 1>::f();
+}
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Test anonymous impl inside negative impl.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    Bad::<u128>::bad();
+}
+
+//! > function_name
+foo
+
+//! > module_code
+pub trait NegImpl<+Drop<u32>> {}
+
+pub trait Bad<T> {
+    fn bad() -> T;
+}
+
+pub impl ImplBad<T, -NegImpl<_>> of Bad<T> {
+    fn bad() -> T {
+        panic!("Bad::bad() called")
+    }
+}
+
+//! > expected_diagnostics
+error[E2196]: Negative impls may only use type or const generic parameters.
+ --> lib.cairo:1:19
+pub trait NegImpl<+Drop<u32>> {}
+                  ^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test negative impl with generic const inside a type.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    bar::<5>();
+}
+
+//! > function_name
+foo
+
+//! > module_code
+use core::metaprogramming::TypeEqual;
+pub trait NegImpl<T> {}
+
+struct A<const B: u32> {}
+
+fn bar<const B: u32>() {
+    Bad::bad();
+}
+
+pub trait Bad {
+    fn bad() -> u32;
+}
+
+pub impl ImplBad<const C: u32, -TypeEqual<A<C>, A<0>>> of Bad {
+    fn bad() -> u32 {
+        C
+    }
+}
+
+//! > expected_diagnostics
+error[E2311]: Trait has no implementation in context: test::Bad.
+ --> lib.cairo:7:10
+    Bad::bad();
+         ^^^

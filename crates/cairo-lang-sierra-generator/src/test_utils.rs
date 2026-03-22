@@ -1,107 +1,113 @@
-use std::sync::Arc;
+use std::sync::{LazyLock, Mutex};
 
-use cairo_lang_defs::db::{DefsDatabase, DefsGroup, HasMacroPlugins};
+use cairo_lang_defs::db::{DefsGroup, init_defs_group, init_external_files};
 use cairo_lang_defs::ids::ModuleId;
-use cairo_lang_defs::plugin::MacroPlugin;
-use cairo_lang_filesystem::db::{
-    init_dev_corelib, init_files_group, AsFilesGroupMut, FilesDatabase, FilesGroup,
-};
+use cairo_lang_filesystem::db::{init_dev_corelib, init_files_group};
 use cairo_lang_filesystem::detect::detect_corelib;
-use cairo_lang_lowering::db::{LoweringDatabase, LoweringGroup};
-use cairo_lang_parser::db::ParserDatabase;
-use cairo_lang_plugins::get_default_plugins;
-use cairo_lang_semantic::db::{SemanticDatabase, SemanticGroup, SemanticGroupEx};
+use cairo_lang_filesystem::flag::{Flag, FlagsGroup};
+use cairo_lang_filesystem::ids::FlagLongId;
+use cairo_lang_lowering::db::{LoweringGroup, lowering_group_input};
+use cairo_lang_semantic::corelib::CorelibSemantic;
+use cairo_lang_semantic::db::{PluginSuiteInput, SemanticGroup, init_semantic_group};
 use cairo_lang_semantic::test_utils::setup_test_crate;
 use cairo_lang_sierra::ids::{ConcreteLibfuncId, GenericLibfuncId};
 use cairo_lang_sierra::program;
-use cairo_lang_syntax::node::db::{SyntaxDatabase, SyntaxGroup};
-use cairo_lang_utils::{Upcast, UpcastMut};
-use salsa::{InternId, InternKey};
+use cairo_lang_utils::{CloneableDatabase, Intern};
+use defs::ids::FreeFunctionId;
+use lowering::ids::ConcreteFunctionWithBodyLongId;
+use lowering::optimizations::config::Optimizations;
+use salsa::{Database, Setter};
+use semantic::inline_macros::get_default_plugin_suite;
 use {cairo_lang_defs as defs, cairo_lang_lowering as lowering, cairo_lang_semantic as semantic};
 
-use crate::db::{SierraGenDatabase, SierraGenGroup};
-use crate::pre_sierra;
+use crate::db::SierraGenGroup;
+use crate::pre_sierra::{self, LabelLongId};
+use crate::program_generator::SierraProgramWithDebug;
 use crate::replace_ids::replace_sierra_ids_in_program;
 use crate::utils::{jump_statement, return_statement, simple_statement};
 
-#[salsa::database(
-    DefsDatabase,
-    FilesDatabase,
-    LoweringDatabase,
-    ParserDatabase,
-    SemanticDatabase,
-    SierraGenDatabase,
-    SyntaxDatabase
-)]
+#[salsa::db]
+#[derive(Clone)]
 pub struct SierraGenDatabaseForTesting {
     storage: salsa::Storage<SierraGenDatabaseForTesting>,
 }
-impl salsa::Database for SierraGenDatabaseForTesting {}
-impl Default for SierraGenDatabaseForTesting {
-    fn default() -> Self {
-        let mut res = Self { storage: Default::default() };
+#[salsa::db]
+impl Database for SierraGenDatabaseForTesting {}
+impl CloneableDatabase for SierraGenDatabaseForTesting {
+    fn dyn_clone(&self) -> Box<dyn CloneableDatabase> {
+        Box::new(self.clone())
+    }
+}
+
+pub static SHARED_DB: LazyLock<Mutex<SierraGenDatabaseForTesting>> =
+    LazyLock::new(|| Mutex::new(SierraGenDatabaseForTesting::new_empty()));
+pub static SHARED_DB_WITHOUT_AD_WITHDRAW_GAS: LazyLock<Mutex<SierraGenDatabaseForTesting>> =
+    LazyLock::new(|| {
+        let mut db = SierraGenDatabaseForTesting::new_empty();
+        let add_withdraw_gas_flag_id = FlagLongId(Flag::ADD_WITHDRAW_GAS.into());
+        db.set_flag(add_withdraw_gas_flag_id, Some(Flag::AddWithdrawGas(false)));
+        Mutex::new(db)
+    });
+pub static SHARED_DB_WITHOUT_ADD_WITHDRAW_GAS_FUTURE_SIERRA: LazyLock<
+    Mutex<SierraGenDatabaseForTesting>,
+> = LazyLock::new(|| {
+    let mut db = SierraGenDatabaseForTesting::new_empty();
+    db.set_flag(FlagLongId(Flag::ADD_WITHDRAW_GAS.into()), Some(Flag::AddWithdrawGas(false)));
+    db.set_flag(FlagLongId(Flag::FUTURE_SIERRA.into()), Some(Flag::FutureSierra(true)));
+    Mutex::new(db)
+});
+impl SierraGenDatabaseForTesting {
+    pub fn new_empty() -> Self {
+        let mut res = SierraGenDatabaseForTesting { storage: Default::default() };
+        init_external_files(&mut res);
         init_files_group(&mut res);
-        res.set_semantic_plugins(get_default_plugins());
+        init_defs_group(&mut res);
+        init_semantic_group(&mut res);
+
+        let plugin_suite = get_default_plugin_suite();
+        res.set_default_plugins_from_suite(plugin_suite);
+
+        lowering_group_input(&res)
+            .set_optimizations(&mut res)
+            .to(Some(Optimizations::enabled_with_minimal_movable_functions()));
+
         let corelib_path = detect_corelib().expect("Corelib not found in default location.");
         init_dev_corelib(&mut res, corelib_path);
         res
     }
-}
-impl AsFilesGroupMut for SierraGenDatabaseForTesting {
-    fn as_files_group_mut(&mut self) -> &mut (dyn FilesGroup + 'static) {
-        self
+    pub fn without_add_withdraw_gas() -> Self {
+        SHARED_DB_WITHOUT_AD_WITHDRAW_GAS.lock().unwrap().snapshot()
+    }
+    pub fn without_add_withdraw_gas_future_sierra() -> Self {
+        SHARED_DB_WITHOUT_ADD_WITHDRAW_GAS_FUTURE_SIERRA.lock().unwrap().snapshot()
+    }
+    /// Snapshots the db for read only.
+    pub fn snapshot(&self) -> SierraGenDatabaseForTesting {
+        SierraGenDatabaseForTesting { storage: self.storage.clone() }
     }
 }
-impl Upcast<dyn FilesGroup> for SierraGenDatabaseForTesting {
-    fn upcast(&self) -> &(dyn FilesGroup + 'static) {
-        self
-    }
-}
-impl UpcastMut<dyn FilesGroup> for SierraGenDatabaseForTesting {
-    fn upcast_mut(&mut self) -> &mut (dyn FilesGroup + 'static) {
-        self
-    }
-}
-impl Upcast<dyn SyntaxGroup> for SierraGenDatabaseForTesting {
-    fn upcast(&self) -> &(dyn SyntaxGroup + 'static) {
-        self
-    }
-}
-impl Upcast<dyn DefsGroup> for SierraGenDatabaseForTesting {
-    fn upcast(&self) -> &(dyn defs::db::DefsGroup + 'static) {
-        self
-    }
-}
-impl Upcast<dyn SemanticGroup> for SierraGenDatabaseForTesting {
-    fn upcast(&self) -> &(dyn semantic::db::SemanticGroup + 'static) {
-        self
-    }
-}
-impl Upcast<dyn LoweringGroup> for SierraGenDatabaseForTesting {
-    fn upcast(&self) -> &(dyn lowering::db::LoweringGroup + 'static) {
-        self
-    }
-}
-impl HasMacroPlugins for SierraGenDatabaseForTesting {
-    fn macro_plugins(&self) -> Vec<Arc<dyn MacroPlugin>> {
-        self.get_macro_plugins()
+impl Default for SierraGenDatabaseForTesting {
+    fn default() -> Self {
+        SHARED_DB.lock().unwrap().snapshot()
     }
 }
 
-/// Compiles `content` to sierra and replaces the sierra ids to make it readable.
+/// Compiles `content` to Sierra and replaces the Sierra IDs to make it readable.
 pub fn checked_compile_to_sierra(content: &str) -> cairo_lang_sierra::program::Program {
-    let (db, crate_id) = setup_db_and_get_crate_id(content);
+    let db = SierraGenDatabaseForTesting::default();
+    let crate_id = setup_db_and_get_crate_id(&db, content);
 
-    let program = db.get_sierra_program(vec![crate_id]).unwrap();
-    replace_sierra_ids_in_program(&db, &program)
+    let SierraProgramWithDebug { program, .. } = db
+        .get_sierra_program(vec![crate_id])
+        .expect("`get_sierra_program` failed. run with RUST_LOG=warn (or less) to see diagnostics");
+    replace_sierra_ids_in_program(&db, program)
 }
 
 /// Adds `content` to a salsa db and returns the crate id that points to it.
-pub fn setup_db_and_get_crate_id(
+pub fn setup_db_and_get_crate_id<'db>(
+    db: &'db SierraGenDatabaseForTesting,
     content: &str,
-) -> (SierraGenDatabaseForTesting, cairo_lang_filesystem::ids::CrateId) {
-    let mut db_val = SierraGenDatabaseForTesting::default();
-    let db = &mut db_val;
+) -> cairo_lang_filesystem::ids::CrateId<'db> {
     let crate_id = setup_test_crate(db, content);
     let module_id = ModuleId::CrateRoot(crate_id);
     db.module_semantic_diagnostics(module_id)
@@ -110,16 +116,22 @@ pub fn setup_db_and_get_crate_id(
     db.module_lowering_diagnostics(module_id)
         .unwrap()
         .expect_with_db(db, "Unexpected lowering diagnostics.");
-    (db_val, crate_id)
+    crate_id
+}
+
+pub fn get_dummy_function<'db>(db: &'db dyn Database) -> FreeFunctionId<'db> {
+    let crate_id = setup_test_crate(db, "fn test(){}");
+    let module_id = ModuleId::CrateRoot(crate_id);
+    db.module_free_functions_ids(module_id).unwrap()[0]
 }
 
 /// Generates a dummy statement with the given name, inputs and outputs.
-pub fn dummy_simple_statement(
-    db: &dyn SierraGenGroup,
+pub fn dummy_simple_statement<'db>(
+    db: &dyn Database,
     name: &str,
     inputs: &[&str],
     outputs: &[&str],
-) -> pre_sierra::Statement {
+) -> pre_sierra::StatementWithLocation<'db> {
     simple_statement(
         dummy_concrete_lib_func_id(db, name),
         &as_var_id_vec(inputs),
@@ -127,7 +139,7 @@ pub fn dummy_simple_statement(
     )
 }
 
-fn dummy_concrete_lib_func_id(db: &dyn SierraGenGroup, name: &str) -> ConcreteLibfuncId {
+fn dummy_concrete_lib_func_id(db: &dyn Database, name: &str) -> ConcreteLibfuncId {
     db.intern_concrete_lib_func(program::ConcreteLibfuncLongId {
         generic_id: GenericLibfuncId::from_string(name),
         generic_args: vec![],
@@ -141,18 +153,18 @@ pub fn as_var_id_vec(ids: &[&str]) -> Vec<cairo_lang_sierra::ids::VarId> {
 
 /// Generates a dummy statement with two branches. One branch is Fallthrough and the other is to the
 /// given label.
-pub fn dummy_simple_branch(
-    db: &dyn SierraGenGroup,
+pub fn dummy_simple_branch<'db>(
+    db: &'db dyn Database,
     name: &str,
     args: &[&str],
     target: usize,
-) -> pre_sierra::Statement {
+) -> pre_sierra::StatementWithLocation<'db> {
     pre_sierra::Statement::Sierra(program::GenStatement::Invocation(program::GenInvocation {
         libfunc_id: dummy_concrete_lib_func_id(db, name),
         args: as_var_id_vec(args),
         branches: vec![
             program::GenBranchInfo {
-                target: program::GenBranchTarget::Statement(label_id_from_usize(target)),
+                target: program::GenBranchTarget::Statement(label_id_from_usize(db, target)),
                 results: vec![],
             },
             program::GenBranchInfo {
@@ -161,36 +173,54 @@ pub fn dummy_simple_branch(
             },
         ],
     }))
+    .into_statement_without_location()
 }
 
 /// Generates a dummy return statement.
-pub fn dummy_return_statement(args: &[&str]) -> pre_sierra::Statement {
-    return_statement(as_var_id_vec(args))
+pub fn dummy_return_statement<'db>(args: &[&str]) -> pre_sierra::StatementWithLocation<'db> {
+    return_statement(as_var_id_vec(args)).into_statement_without_location()
 }
 
 /// Generates a dummy label.
-pub fn dummy_label(id: usize) -> pre_sierra::Statement {
-    pre_sierra::Statement::Label(pre_sierra::Label { id: label_id_from_usize(id) })
+pub fn dummy_label<'db>(
+    db: &'db dyn Database,
+    id: usize,
+) -> pre_sierra::StatementWithLocation<'db> {
+    pre_sierra::Statement::Label(pre_sierra::Label { id: label_id_from_usize(db, id) })
+        .into_statement_without_location()
 }
 
 /// Generates a dummy jump to label statement.
-pub fn dummy_jump_statement(db: &dyn SierraGenGroup, id: usize) -> pre_sierra::Statement {
-    jump_statement(dummy_concrete_lib_func_id(db, "jump"), label_id_from_usize(id))
+pub fn dummy_jump_statement<'db>(
+    db: &'db dyn Database,
+    id: usize,
+) -> pre_sierra::StatementWithLocation<'db> {
+    jump_statement(dummy_concrete_lib_func_id(db, "jump"), label_id_from_usize(db, id))
+        .into_statement_without_location()
 }
 
 /// Returns the [pre_sierra::LabelId] for the given `id`.
-pub fn label_id_from_usize(id: usize) -> pre_sierra::LabelId {
-    pre_sierra::LabelId::from_intern_id(InternId::from(id))
+pub fn label_id_from_usize(db: &dyn Database, id: usize) -> pre_sierra::LabelId<'_> {
+    let free_function_id = get_dummy_function(db);
+    let semantic_function = semantic::items::functions::ConcreteFunctionWithBody {
+        generic_function: semantic::items::functions::GenericFunctionWithBodyId::Free(
+            free_function_id,
+        ),
+        generic_args: vec![],
+    }
+    .intern(db);
+    let parent = ConcreteFunctionWithBodyLongId::Semantic(semantic_function).intern(db);
+    LabelLongId { parent, id }.intern(db)
 }
 
 /// Generates a dummy [PushValues](pre_sierra::Statement::PushValues) statement.
 ///
 /// values is a list of pairs (src, dst) where src refers to a variable that should be pushed onto
 /// the stack, and dst is the variable after placing it on the stack.
-pub fn dummy_push_values(
-    db: &dyn SierraGenGroup,
+pub fn dummy_push_values<'db>(
+    db: &dyn Database,
     values: &[(&str, &str)],
-) -> pre_sierra::Statement {
+) -> pre_sierra::StatementWithLocation<'db> {
     dummy_push_values_ex(
         db,
         &values.iter().map(|(src, dst)| (*src, *dst, false)).collect::<Vec<_>>(),
@@ -198,12 +228,12 @@ pub fn dummy_push_values(
 }
 
 /// Same as [dummy_push_values] except that it also accepts a value for `dup`.
-pub fn dummy_push_values_ex(
-    db: &dyn SierraGenGroup,
+pub fn dummy_push_values_ex<'db>(
+    db: &dyn Database,
     values: &[(&str, &str, bool)],
-) -> pre_sierra::Statement {
+) -> pre_sierra::StatementWithLocation<'db> {
     let felt252_ty =
-        db.get_concrete_type_id(db.core_felt252_ty()).expect("Can't find core::felt252.");
+        db.get_concrete_type_id(db.core_info().felt252).expect("Can't find core::felt252.");
     pre_sierra::Statement::PushValues(
         values
             .iter()
@@ -215,9 +245,11 @@ pub fn dummy_push_values_ex(
             })
             .collect(),
     )
+    .into_statement_without_location()
 }
 
 /// Creates a test for a given function that reads test files.
+///
 /// filenames - a vector of tests files the test will apply to.
 /// db - the salsa DB to use for the test.
 /// func - the function to be applied on the test params to generate the tested result.

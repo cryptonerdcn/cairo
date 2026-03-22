@@ -12,16 +12,16 @@ expression, and a comma.
 A xref:block-expression.adoc[block expression] is typically used if the logic in the arm is more
 than a single expression.
 The pattern in a given arm may introduce xref:variables.adoc[variables] that can be used in
-expression of the said arm.
+the expression of the said arm.
 If the pattern contains variables that are unused in the expression, then the wildcard `_` can be
-used in thier place.
+used in their place.
 
 == Semantics
 
 A match expression is evaluated by evaluating the expression and then matching the value against
 the patterns in the arms in order. The first arm whose pattern matches the value of the expression
 is executed and the result of the expression in the arm is returned as the result of the match.
-[Note]
+[NOTE]
 ====
 All the arms that don't break the control flow must evaluate to the same type.
 An arm breaks the control flow if it
@@ -37,17 +37,17 @@ Currently two kinds of match expression are supported:
 [source, cairo]
 ----
 match enum_var {
-    varint_0(a, b, c) => { /* code */ }
-    varint_1(_) => { /* code */ }
+    variant_0(a, b, c) => { /* code */ }
+    variant_1(_) => { /* code */ }
     ...
     variant_k(a, c) => { /* code */ }
 }
 ----
 
-Where `enum_var` is an instance of some xref:enums.adoc[enum] and `varint_0``, `varint_1`, ...,
-`variant_k`` are all the variants of the said enum, order in the way that they were declered.
+Where `enum_var` is an instance of some xref:enums.adoc[enum] and `variant_0`, `variant_1`, ...,
+`variant_k` are all the variants of the said enum, ordered in the way that they were declared.
 
-=== Match on an felt252.
+=== Match on a felt252.
 
 [source, cairo]
 ----
@@ -57,5 +57,5 @@ match felt_var {
 }
 ----
 
-Where `felt_var` is a xref:felt252-type.adoc[felt252] and the match patters are the
-xref:literal-expressions.adoc[literal] '0' and wildcard '_' (which matches any value).
+Where `felt_var` is a xref:felt252-type.adoc[felt252] and the match patterns are the
+xref:literal-expressions.adoc[literal] `0` and wildcard `_` (which matches any value).

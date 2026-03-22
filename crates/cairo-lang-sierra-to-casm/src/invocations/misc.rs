@@ -1,20 +1,22 @@
 use cairo_lang_casm::builder::{CasmBuilder, Var};
 use cairo_lang_casm::cell_expression::CellExpression;
 use cairo_lang_casm::{casm, casm_build_extend};
+use cairo_lang_sierra::extensions::gas::CostTokenType;
 use cairo_lang_sierra::program::{BranchInfo, BranchTarget};
 use cairo_lang_sierra_gas::objects::ConstCost;
 use itertools::Itertools;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, ToBigInt};
+use starknet_types_core::felt::Felt as Felt252;
 
 use super::{
-    get_non_fallthrough_statement_id, CompiledInvocation, CompiledInvocationBuilder,
-    InvocationError,
+    CompiledInvocation, CompiledInvocationBuilder, InvocationError,
+    get_non_fallthrough_statement_id,
 };
-use crate::invocations::add_input_variables;
+use crate::invocations::{BuiltinInfo, CostValidationInfo, add_input_variables};
 use crate::references::ReferenceExpression;
 use crate::relocations::{InstructionsWithRelocations, Relocation, RelocationEntry};
 
-/// Handles a revoke/enable/disable ap tracking instructions.
+/// Handles revoke/enable/disable AP-tracking instructions.
 pub fn build_update_ap_tracking(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {
@@ -46,12 +48,12 @@ pub fn build_single_cell_const(
     ))
 }
 
-/// Handles a jump non zero statement.
+/// Handles a jump-non-zero statement.
 /// For example, this "Sierra statement"
 /// ```ignore
 /// felt252_is_zero(var=[ap-10]) { fallthrough() 1000(var) };
 /// ```
-/// translates to these casm instructions:
+/// translates to these CASM instructions:
 /// ```ignore
 /// jmp rel <jump_offset_1000> if [ap-10] != 0
 /// ```
@@ -59,7 +61,7 @@ pub fn build_is_zero(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {
     let [value] = builder.try_get_single_cells()?;
-    let mut casm_builder = CasmBuilder::default();
+    let mut casm_builder = CasmBuilder::with_capacity(1, 1);
     add_input_variables!(casm_builder, deref value; );
     casm_build_extend! {casm_builder,
         jump Target if value != 0;
@@ -80,7 +82,7 @@ pub fn build_jump(
         [BranchInfo { target: BranchTarget::Statement(statement_id), .. }] => statement_id,
         _ => panic!("malformed invocation"),
     };
-    let mut casm_builder = CasmBuilder::default();
+    let mut casm_builder = CasmBuilder::with_capacity(1, 1);
     casm_build_extend! {casm_builder,
         jump Target;
     };
@@ -91,7 +93,7 @@ pub fn build_jump(
     ))
 }
 
-/// Handles an operations that does no changes to the reference expressions.
+/// Handles an operation that does no changes to the reference expressions.
 pub fn build_identity(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {
@@ -121,7 +123,7 @@ pub fn build_branch_align(
 pub fn build_cell_eq(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {
-    let mut casm_builder = CasmBuilder::default();
+    let mut casm_builder = CasmBuilder::with_capacity(3, 2);
     let [a, b] = builder.try_get_single_cells()?;
 
     add_input_variables! {casm_builder,
@@ -191,10 +193,7 @@ pub fn validate_under_limit<const K: u8>(
             let (x, y, x_part, y_fixed) =
                 auxiliary_vars.iter().cloned().collect_tuple().expect("Wrong amount of vars.");
             casm_build_extend! {casm_builder,
-                hint LinearSplit {
-                    value: value,
-                    scalar: a_imm, max_x: u128_limit_minus_1
-                } into {x: x, y: y};
+                hint LinearSplit { value, scalar: a_imm, max_x: u128_limit_minus_1 } into { x, y };
                 assert x_part = x * a_imm;
                 assert value = x_part + y;
                 // x <= max_x = 2**128 - 1
@@ -211,10 +210,7 @@ pub fn validate_under_limit<const K: u8>(
                 auxiliary_vars.iter().cloned().collect_tuple().expect("Wrong amount of vars.");
             casm_build_extend! {casm_builder,
                 const u128_limit_minus_2 = u128::MAX - 1;
-                hint LinearSplit {
-                    value: value,
-                    scalar: a_imm, max_x: u128_limit_minus_2
-                } into {x: x, y: y};
+                hint LinearSplit { value, scalar: a_imm, max_x: u128_limit_minus_2 } into { x, y };
                 assert x_part = x * a_imm;
                 assert value = x_part + y;
                 // y < 2**128
@@ -226,6 +222,7 @@ pub fn validate_under_limit<const K: u8>(
                 assert x = *(range_check++);
                 assert diff = x - u128_limit_minus_1;
                 jump Done if diff != 0;
+                // As x cannot be 2**128 - 1, this is unreachable.
                 fail;
             };
         }
@@ -239,13 +236,13 @@ pub fn validate_under_limit<const K: u8>(
 /// Returns the instructions and the corresponding ap-change.
 pub fn get_pointer_after_program_code(offset: i32) -> (InstructionsWithRelocations, usize) {
     let ctx = casm! {
-        // The relocation table will point the `call` to the end of the program where there will
+        // The relocation table will point the `call` to the end of the program, where there will
         // be a `ret` instruction.
         call rel 0;
         // After calling an empty function, `[ap - 1]` contains the current `pc`.
-        // Using the relocations below, the immediate value (`1`) will be changed so that it will
-        // compute a pointer to the second cell after the end of the program, which will contain
-        // the pointer to the builtin cost array.
+        // Using the relocations below, the immediate value (`offset`) will be changed so that it
+        // will compute a pointer to the second cell after the end of the program, which will
+        // contain the pointer to the builtin cost array.
         [ap] = [ap - 1] + (offset), ap++;
     };
     let relocations = vec![
@@ -261,4 +258,58 @@ pub fn get_pointer_after_program_code(offset: i32) -> (InstructionsWithRelocatio
         },
         3,
     )
+}
+
+/// Builds a libfunc that tries to convert a felt252 to a type with values in the range
+/// `[0, 2**num_bits)`.
+/// Assumption: num_bits > 128.
+pub fn build_unsigned_try_from_felt252(
+    builder: CompiledInvocationBuilder<'_>,
+    num_bits: usize,
+) -> Result<CompiledInvocation, InvocationError> {
+    let val_bound: BigInt = BigInt::from(1) << num_bits;
+    let [range_check, value] = builder.try_get_single_cells()?;
+    let mut casm_builder = CasmBuilder::with_capacity(15, 2);
+    add_input_variables! {casm_builder,
+        buffer(2) range_check;
+        deref value;
+    };
+    let auxiliary_vars: [_; 4] = std::array::from_fn(|_| casm_builder.alloc_var(false));
+    casm_build_extend! {casm_builder,
+        const limit = val_bound.clone();
+        let orig_range_check = range_check;
+        tempvar is_valid_value;
+        hint TestLessThan {lhs: value, rhs: limit} into {dst: is_valid_value};
+        jump IsValidValue if is_valid_value != 0;
+        tempvar shifted_value = value - limit;
+    }
+    validate_under_limit::<1>(
+        &mut casm_builder,
+        &(Felt252::prime().to_bigint().unwrap() - val_bound.clone()),
+        shifted_value,
+        range_check,
+        &auxiliary_vars,
+    );
+    casm_build_extend! {casm_builder,
+        jump Failure;
+        IsValidValue:
+    };
+    validate_under_limit::<1>(&mut casm_builder, &val_bound, value, range_check, &auxiliary_vars);
+
+    let failure_handle_statement_id = get_non_fallthrough_statement_id(&builder);
+    Ok(builder.build_from_casm_builder(
+        casm_builder,
+        [
+            ("Fallthrough", &[&[range_check], &[value]], None),
+            ("Failure", &[&[range_check]], Some(failure_handle_statement_id)),
+        ],
+        CostValidationInfo {
+            builtin_infos: vec![BuiltinInfo {
+                cost_token_ty: CostTokenType::RangeCheck,
+                start: orig_range_check,
+                end: range_check,
+            }],
+            extra_costs: None,
+        },
+    ))
 }

@@ -1,9 +1,9 @@
 //! > Test logical operators.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
+//! > function_code
 fn foo(a: u128, b: u128, c: u128) -> bool {
     a && b || c
 }
@@ -11,20 +11,18 @@ fn foo(a: u128, b: u128, c: u128) -> bool {
 //! > function_name
 foo
 
-//! > module_code
-
 //! > expected_diagnostics
-error: Expected type "core::bool", found: "core::integer::u128".
+error[E2039]: Expected type "core::bool", found: "core::integer::u128".
  --> lib.cairo:2:5
     a && b || c
     ^
 
-error: Expected type "core::bool", found: "core::integer::u128".
+error[E2039]: Expected type "core::bool", found: "core::integer::u128".
  --> lib.cairo:2:10
     a && b || c
          ^
 
-error: Expected type "core::bool", found: "core::integer::u128".
+error[E2039]: Expected type "core::bool", found: "core::integer::u128".
  --> lib.cairo:2:15
     a && b || c
               ^
@@ -34,9 +32,9 @@ error: Expected type "core::bool", found: "core::integer::u128".
 //! > Single sided if.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
+//! > function_code
 fn foo(a: bool, b: bool, c: bool) -> bool {
     bar(a, b, c)
 }
@@ -50,17 +48,12 @@ fn bar<S, T>(a: S, b: bool, c: T) -> bool {
 }
 
 //! > expected_diagnostics
-error: Expected type "core::bool", found: "S".
+error[E2039]: Expected type "core::bool", found: "S".
  --> lib.cairo:2:5
     a && Default::default() || c
     ^
 
-error: Expected type "core::bool", found: "T".
+error[E2039]: Expected type "core::bool", found: "T".
  --> lib.cairo:2:32
     a && Default::default() || c
                                ^
-
-error: Trait has no implementation in context: core::traits::Default::<core::bool>
- --> lib.cairo:2:19
-    a && Default::default() || c
-                  ^*****^

@@ -38,7 +38,9 @@ pub trait SignatureSpecializationContext: TypeSpecializationContext {
     }
 
     /// Returns the ap-change of the given function.
-    fn try_get_function_ap_change(&self, function_id: &FunctionId) -> Option<SierraApChange>;
+    fn try_get_function_ap_change(&self, function_id: &FunctionId) -> Option<SierraApChange> {
+        Some(SierraApChange::FunctionCall(function_id.clone()))
+    }
 
     /// Wraps [Self::try_get_function_ap_change] with a result object.
     fn get_function_ap_change(
@@ -57,17 +59,10 @@ pub trait SignatureSpecializationContext: TypeSpecializationContext {
     ) -> Result<ConcreteTypeId, SpecializationError> {
         self.get_concrete_type(id, &[GenericArg::Type(wrapped)])
     }
-
-    /// Upcasting to the [TypeSpecializationContext], since trait upcasting is still experimental.
-    fn as_type_specialization_context(&self) -> &dyn TypeSpecializationContext;
 }
 
 /// Trait for the specialization of full libfuncs.
 pub trait SpecializationContext: SignatureSpecializationContext {
-    /// Upcasting to the [SignatureSpecializationContext], since trait upcasting is still
-    /// experimental.
-    fn upcast(&self) -> &dyn SignatureSpecializationContext;
-
     /// Returns the function object associated with the given [FunctionId].
     fn try_get_function(&self, function_id: &FunctionId) -> Option<Function>;
 
@@ -229,9 +224,7 @@ impl<T: SignatureOnlyGenericLibfunc> NamedLibfunc for T {
         context: &dyn SpecializationContext,
         args: &[GenericArg],
     ) -> Result<Self::Concrete, SpecializationError> {
-        Ok(SignatureOnlyConcreteLibfunc {
-            signature: self.specialize_signature(context.upcast(), args)?,
-        })
+        Ok(SignatureOnlyConcreteLibfunc { signature: self.specialize_signature(context, args)? })
     }
 }
 
@@ -260,7 +253,7 @@ impl<T: SignatureAndTypeGenericLibfunc> NamedLibfunc for WrapSignatureAndTypeGen
         context: &dyn SignatureSpecializationContext,
         args: &[GenericArg],
     ) -> Result<LibfuncSignature, SpecializationError> {
-        self.0.specialize_signature(context, args_as_single_type(args)?)
+        self.0.specialize_signature(context, args_as_single_type(args)?.clone())
     }
 
     fn specialize(
@@ -271,7 +264,7 @@ impl<T: SignatureAndTypeGenericLibfunc> NamedLibfunc for WrapSignatureAndTypeGen
         let ty = args_as_single_type(args)?;
         Ok(SignatureAndTypeConcreteLibfunc {
             ty: ty.clone(),
-            signature: self.0.specialize_signature(context.upcast(), ty)?,
+            signature: self.0.specialize_signature(context, ty.clone())?,
         })
     }
 }
@@ -302,7 +295,7 @@ impl<T: NoGenericArgsGenericLibfunc> SignatureOnlyGenericLibfunc for T {
 }
 
 /// Information regarding a parameter of the libfunc.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ParamSignature {
     /// The type of the parameter.
     pub ty: ConcreteTypeId,
@@ -353,9 +346,10 @@ impl From<ConcreteTypeId> for ParamSignature {
 }
 
 /// Information regarding the reference created as an output of a library function.
+///
 /// For example, whether the reference is equal to one of the parameters (as in the dup() function),
-/// or whether it's newly allocated local variable.
-#[derive(Debug, Clone)]
+/// or whether it's a newly allocated local variable.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputVarReferenceInfo {
     /// The output value is exactly the same as one of the parameters.
     SameAsParam { param_idx: usize },
@@ -379,32 +373,34 @@ pub enum OutputVarReferenceInfo {
     Deferred(DeferredOutputKind),
     /// All the output cells are of the form `[ap/fp + const]`. For example, `([ap + 1], [fp])`.
     SimpleDerefs,
+    /// The output is of size 0.
+    ZeroSized,
 }
 
 /// The type of a deferred output.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum DeferredOutputKind {
     /// The output is a constant. For example, `7`.
     Const,
-    /// The output is the addition of a constant to one of the parameters. For example, `x + 3`.
-    AddConst { param_idx: usize },
+    /// The output is the addition of a constant to a deferred value. For example, `[ap - 5] + 4`.
+    AddConst,
     /// The output is not one of the above (e.g., `[ap] + [fp]`, `[ap + 1] * [fp - 3]`,
     /// `[ap] * 3`).
     Generic,
 }
 
 /// Contains information regarding an output variable in a single branch.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct OutputVarInfo {
     pub ty: ConcreteTypeId,
     pub ref_info: OutputVarReferenceInfo,
 }
 impl OutputVarInfo {
     /// Convenience function to get the common OutputVarInfo for builtins.
-    pub fn new_builtin(builtin: ConcreteTypeId, param_idx: usize) -> Self {
+    pub fn new_builtin(builtin: ConcreteTypeId) -> Self {
         Self {
             ty: builtin,
-            ref_info: OutputVarReferenceInfo::Deferred(DeferredOutputKind::AddConst { param_idx }),
+            ref_info: OutputVarReferenceInfo::Deferred(DeferredOutputKind::AddConst),
         }
     }
 }
@@ -413,7 +409,7 @@ impl OutputVarInfo {
 /// for all the output variables in an output branch.
 ///
 /// See [OutputVarInfo].
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BranchSignature {
     /// Information about the new variables created in the branch.
     pub vars: Vec<OutputVarInfo>,
@@ -436,6 +432,8 @@ pub enum SierraApChange {
     /// The lib func is `branch_align`.
     /// The `ap` change is known during compilation.
     BranchAlign,
+    /// This is a function call, and the ap change should be fetched elsewhere.
+    FunctionCall(FunctionId),
 }
 /// Trait for a specialized library function.
 pub trait ConcreteLibfunc {
@@ -448,17 +446,18 @@ pub trait ConcreteLibfunc {
     fn fallthrough(&self) -> Option<usize>;
 
     /// Returns the output types returning from a library function per branch.
-    fn output_types(&self) -> Vec<Vec<ConcreteTypeId>> {
+    fn output_types(
+        &self,
+    ) -> impl Iterator<Item = impl ExactSizeIterator<Item = &ConcreteTypeId> + DoubleEndedIterator>
+    {
         self.branch_signatures()
             .iter()
-            .map(|branch_info| {
-                branch_info.vars.iter().map(|var_info| var_info.ty.clone()).collect()
-            })
-            .collect()
+            .map(|branch_info| branch_info.vars.iter().map(|var_info| &var_info.ty))
     }
 }
 
 /// Represents the signature of a library function.
+#[derive(Clone, PartialEq, Eq)]
 pub struct LibfuncSignature {
     /// The parameter types and other information for the parameters for calling a library
     /// function.

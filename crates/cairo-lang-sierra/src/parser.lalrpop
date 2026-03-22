@@ -3,6 +3,7 @@
 
 use crate::ids::*;
 use crate::program::*;
+use crate::labeled_statement::{StatementId, PreStatement, finalize_prestatements};
 use num_bigint::BigInt;
 
 grammar;
@@ -10,9 +11,12 @@ grammar;
 pub Program: Program = {
     <type_declarations:TypeDeclaration*>
     <libfunc_declarations:LibfuncDeclaration*>
-    <statements:Statement*>
+    <statements:PreStatement*>
     <funcs:Function*>
-    => Program{type_declarations, libfunc_declarations, statements, funcs},
+    => {
+        let (statements, funcs) = finalize_prestatements(statements, funcs);
+        Program { type_declarations, libfunc_declarations, statements, funcs }
+    },
 }
 
 TypeDeclaration: TypeDeclaration = {
@@ -24,12 +28,12 @@ TypeDeclaration: TypeDeclaration = {
 }
 
 DeclaredTypeInfo: Option<DeclaredTypeInfo> = {
-    "with_info" "{"
+    "["
         "storable:" <storable:Bool> ","
-        "droppable:" <droppable:Bool> ","
-        "duplicatable:" <duplicatable:Bool> ","
-        "zero_sized:" <zero_sized:Bool> ","
-    "}"
+        "drop:" <droppable:Bool> ","
+        "dup:" <duplicatable:Bool> ","
+        "zero_sized:" <zero_sized:Bool>
+    "]"
     => Some(DeclaredTypeInfo {
         storable,
         droppable,
@@ -56,10 +60,10 @@ pub ConcreteLibfuncLongId: ConcreteLibfuncLongId = {
     <generic_id:GenericLibfuncId> => ConcreteLibfuncLongId{generic_id, generic_args: vec![]},
 }
 
-Function: Function = {
-    <id:FunctionId> "@" <entry:StatementIdx>
+Function: GenFunction<StatementId> = {
+    <id:FunctionId> "@" <entry:StatementId>
     "(" <params: Params> ")" "->" "(" <ret_types: ConcreteTypeIds> ")" ";"
-    => Function::new(id, params, ret_types, entry),
+    => GenFunction::new(id, params, ret_types, entry),
 }
 
 Param: Param = {
@@ -78,12 +82,40 @@ ConcreteLibfuncId: ConcreteLibfuncId = {
 
 FunctionId: FunctionId = {
     <id:ConcreteLabel> => FunctionId::from_string(id),
+    <id:ConcreteLabel> <extra1:BracketsTokenTree> <extra2:BracesTokenTree> =>
+        FunctionId::from_string(format!("{id}{extra1}{extra2}")),
+    <id:ConcreteLabel> <extra:BracketsTokenTree> => FunctionId::from_string(format!("{id}{extra}")),
+    <id:ConcreteLabel> <extra:BracesTokenTree> => FunctionId::from_string(format!("{id}{extra}")),
     "[" <id:UnsignedInt> "]" => FunctionId::new(id),
 }
 
 UserTypeId: UserTypeId = {
     <id:ConcreteLabel> => UserTypeId::from_string(id),
     "[" <id:BigInt> "]" => UserTypeId { id: id.try_into().unwrap(), debug_name: None },
+    <value:BracesTokenTree> => UserTypeId::from_string(value),
+}
+
+TokenTree: String = {
+    <value:BracesTokenTree> => value,
+    <value:BracketsTokenTree> => value,
+    "(" <parts:(<TokenTree>)*> ")" => format!("({})", parts.join("")),
+    <label:BasicLabel> => label,
+    <num:BigInt> => num.to_string(),
+    ":" => <>.to_string(),
+    "," => <>.to_string(),
+    "." => <>.to_string(),
+    "@" => <>.to_string(),
+    "/" => <>.to_string(),
+    "\\" => <>.to_string(),
+    "-" => <>.to_string(),
+}
+
+BracesTokenTree: String = {
+    "{" <parts:(<TokenTree>)*> "}" => format!("{{{}}}", parts.join("")),
+}
+
+BracketsTokenTree: String = {
+    "[" <parts:(<TokenTree>)*> "]" => format!("[{}]", parts.join("")),
 }
 
 VarId: VarId = {
@@ -98,13 +130,16 @@ GenericTypeId: GenericTypeId = {
 
 ConcreteTypeId: ConcreteTypeId = {
     <id:ConcreteLabel> => ConcreteTypeId::from_string(id),
-    "@" <id:ConcreteLabel> => ConcreteTypeId::from_string(format!("@{id}")),
+    "@" <ty:ConcreteTypeId> => ConcreteTypeId::from_string(format!("@{ty}")),
     "[" <id:UnsignedInt> "]" => ConcreteTypeId::new(id),
+    "[" <ty:ConcreteTypeId> ";" <count:UnsignedInt> "]" =>
+        ConcreteTypeId::from_string(format!("[{ty}; {count}]")),
 }
 ConcreteTypeIds = Comma<ConcreteTypeId>;
 
-StatementIdx: StatementIdx = {
-     <id:UnsignedInt> => StatementIdx(id as usize),
+StatementId: StatementId = {
+     <id:UnsignedInt> => StatementId::Idx(StatementIdx(id as usize)),
+     <label:BasicLabel> => StatementId::Label(label),
 }
 
 GenericArg: GenericArg = {
@@ -116,20 +151,25 @@ GenericArg: GenericArg = {
 }
 GenericArgs = Comma<GenericArg>;
 
-Statement: Statement = {
-    <invocation:Invocation> => Statement::Invocation(invocation),
-    "return" "(" <args:VarIds> ")" ";" => Statement::Return(args),
+PreStatement: PreStatement = {
+    <label: BasicLabel> ":" => PreStatement::Label(label),
+    <statement: Statement> => PreStatement::Statement(statement),
 }
 
-Invocation: Invocation = {
+Statement: GenStatement<StatementId> = {
+    <invocation:Invocation> => GenStatement::Invocation(invocation),
+    "return" "(" <args:VarIds> ")" ";" => GenStatement::Return(args),
+}
+
+Invocation: GenInvocation<StatementId> = {
     <libfunc_id:ConcreteLibfuncId> "(" <args:VarIds> ")" "->" "(" <results:VarIds> ")" ";" =>
-        Invocation{
+        GenInvocation {
             libfunc_id,
             args,
-            branches: vec![BranchInfo{ target: BranchTarget::Fallthrough , results }]
+            branches: vec![GenBranchInfo { target: GenBranchTarget::Fallthrough , results }]
         },
     <libfunc_id:ConcreteLibfuncId> "(" <args:VarIds> ")" "{" <branches:BranchInfo*> "}" ";" =>
-        Invocation{libfunc_id, args, branches},
+        GenInvocation {libfunc_id, args, branches },
 }
 
 // Generates a vector of Ts with or without a trailing comma.
@@ -145,14 +185,14 @@ Comma<T>: Vec<T> = {
     }
 };
 
-BranchInfo: BranchInfo = {
+BranchInfo: GenBranchInfo<StatementId> = {
     <target: BranchTarget> "(" <results:VarIds> ")" =>
-        BranchInfo{ target, results },
+        GenBranchInfo { target, results },
 }
 
-BranchTarget: BranchTarget = {
-     "fallthrough" => BranchTarget::Fallthrough,
-     <id:StatementIdx> => BranchTarget::Statement(id),
+BranchTarget: GenBranchTarget<StatementId> = {
+     "fallthrough" => GenBranchTarget::Fallthrough,
+     <id:StatementId> => GenBranchTarget::Statement(id),
 }
 
 BasicLabel: String = {
@@ -169,6 +209,7 @@ PathLabel: String = {
 GenericArgsString: String = {
     GenericArg => <>.to_string(),
     <head:GenericArgsString> "," <tail:GenericArg> => format!("{head}, {tail}"),
+    <head:GenericArgsString> "," "..." => format!("{head}, ..."),
 }
 
 // Label that can also include generic arguments.

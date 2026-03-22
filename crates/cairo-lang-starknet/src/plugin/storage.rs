@@ -1,256 +1,223 @@
-use cairo_lang_defs::plugin::PluginDiagnostic;
-use cairo_lang_semantic::patcher::RewriteNode;
-use cairo_lang_syntax::node::db::SyntaxGroup;
-use cairo_lang_syntax::node::{ast, Terminal, TypedSyntaxNode};
-use cairo_lang_utils::try_extract_matches;
-use cairo_lang_utils::unordered_hash_map::UnorderedHashMap;
+use cairo_lang_defs::patcher::RewriteNode;
+use cairo_lang_defs::plugin::{MacroPluginMetadata, PluginDiagnostic};
+use cairo_lang_syntax::node::helpers::GetIdentifier;
+use cairo_lang_syntax::node::{TypedSyntaxNode, ast};
 use indoc::formatdoc;
+use itertools::zip_eq;
+use salsa::Database;
 
-use crate::contract::starknet_keccak;
+use super::starknet_module::generation_data::StarknetModuleCommonGenerationData;
+use super::starknet_module::{StarknetModuleKind, backwards_compatible_storage};
+use super::storage_interfaces::{
+    StorageMemberKind, handle_storage_interface_struct, struct_members_storage_configs,
+};
+use super::{CONCRETE_COMPONENT_STATE_NAME, CONTRACT_STATE_NAME, STORAGE_STRUCT_NAME};
+use crate::plugin::SUBSTORAGE_ATTR;
 
-/// Generate getters and setters for the variables in the storage struct.
-pub fn handle_storage_struct(
-    db: &dyn SyntaxGroup,
-    struct_ast: ast::ItemStruct,
-    extra_uses_node: &RewriteNode,
-    has_event: bool,
-) -> (RewriteNode, Vec<PluginDiagnostic>) {
-    let mut members_code = Vec::new();
-    let mut members_init_code = Vec::new();
-    let mut vars_code = Vec::new();
-    let mut diagnostics = vec![];
+/// Generate getters and setters for the members of the storage struct.
+pub fn handle_storage_struct<'db, 'a>(
+    db: &'db dyn Database,
+    diagnostics: &mut Vec<PluginDiagnostic<'db>>,
+    struct_ast: ast::ItemStruct<'db>,
+    starknet_module_kind: StarknetModuleKind,
+    data: &mut StarknetModuleCommonGenerationData<'db>,
+    metadata: &'a MacroPluginMetadata<'a>,
+) {
+    let state_struct_name = starknet_module_kind.get_state_struct_name();
+    let generic_arg_str = starknet_module_kind.get_generic_arg_str();
+    let full_generic_arg_str = starknet_module_kind.get_full_generic_arg_str();
+    let full_state_struct_name = starknet_module_kind.get_full_state_struct_name();
 
-    for member in struct_ast.members(db).elements(db) {
-        let name_node = member.name(db).as_syntax_node();
-        let name = member.name(db).text(db);
-        members_code.push(RewriteNode::interpolate_patched(
-            "
-        $name$: $name$::ContractState,",
-            UnorderedHashMap::from([(
-                "name".to_string(),
-                RewriteNode::new_trimmed(name_node.clone()),
-            )]),
-        ));
-        members_init_code.push(RewriteNode::interpolate_patched(
-            "
-            $name$: $name$::ContractState{},",
-            UnorderedHashMap::from([("name".to_string(), RewriteNode::new_trimmed(name_node))]),
-        ));
-        let address = format!("0x{:x}", starknet_keccak(name.as_bytes()));
-        let type_ast = member.type_clause(db).ty(db);
-        match try_extract_mapping_types(db, &type_ast) {
-            Some((key_type_ast, value_type_ast, MappingType::Legacy)) => {
-                vars_code.push(RewriteNode::interpolate_patched(
-                    handle_legacy_mapping_storage_var(&address).as_str(),
-                    [
-                        (
-                            "storage_var_name".to_string(),
-                            RewriteNode::new_trimmed(member.name(db).as_syntax_node()),
-                        ),
-                        ("extra_uses".to_string(), extra_uses_node.clone()),
-                        (
-                            "key_type".to_string(),
-                            RewriteNode::new_trimmed(key_type_ast.as_syntax_node()),
-                        ),
-                        (
-                            "value_type".to_string(),
-                            RewriteNode::new_trimmed(value_type_ast.as_syntax_node()),
-                        ),
-                    ]
-                    .into(),
-                ));
-            }
-            Some((_, _, MappingType::NonLegacy)) => {
-                diagnostics.push(PluginDiagnostic {
-                    message: "Non `LegacyMap` mapping is not yet supported.".to_string(),
-                    stable_ptr: type_ast.stable_ptr().untyped(),
-                });
-            }
-            None => {
-                vars_code.push(RewriteNode::interpolate_patched(
-                    handle_simple_storage_var(&address).as_str(),
-                    [
-                        (
-                            "storage_var_name".to_string(),
-                            RewriteNode::new_trimmed(member.name(db).as_syntax_node()),
-                        ),
-                        ("extra_uses".to_string(), extra_uses_node.clone()),
-                        (
-                            "type_name".to_string(),
-                            RewriteNode::new_trimmed(type_ast.as_syntax_node()),
-                        ),
-                    ]
-                    .into(),
+    let is_backwards_compatible_storage = backwards_compatible_storage(metadata.edition);
+    let mut substorage_members_struct_code = vec![];
+    let mut substorage_members_init_code = vec![];
+    let mut storage_struct_members = vec![];
+    let configs = struct_members_storage_configs(db, &struct_ast, diagnostics);
+    for (member, config) in zip_eq(struct_ast.members(db).elements(db), &configs) {
+        if config.kind == StorageMemberKind::SubStorage {
+            if let Some((struct_code, init_code)) =
+                get_substorage_member_code(db, &member, metadata)
+            {
+                substorage_members_struct_code.push(struct_code);
+                substorage_members_init_code.push(init_code);
+            } else {
+                diagnostics.push(PluginDiagnostic::error(
+                    member.stable_ptr(db),
+                    format!(
+                        "`{SUBSTORAGE_ATTR}` attribute is only allowed for members of type \
+                         `[some_path::]{STORAGE_STRUCT_NAME}`"
+                    ),
                 ));
             }
         }
+        if is_backwards_compatible_storage {
+            storage_struct_members.push(get_simple_member_code(db, &member, metadata));
+        }
     }
-    let empty_event_code =
-        if has_event { "" } else { "#[event] #[derive(Drop, starknet::Event)] enum Event {}\n" };
-    let storage_code = RewriteNode::interpolate_patched(
+
+    let module_kind = starknet_module_kind.to_str_lower();
+    let unsafe_new_function_name = format!("unsafe_new_{module_kind}_state");
+    let storage_struct_code = if is_backwards_compatible_storage {
         formatdoc!(
             "
-            use starknet::event::EventEmitter;
-            #[derive(Drop)]
-                struct ContractState {{$members_code$
-                }}
-                #[inline(always)]
-                fn unsafe_new_contract_state() -> ContractState {{
-                    ContractState {{$member_init_code$
-                    }}
-                }}
-                #[cfg(test)]
-                #[inline(always)]
-                fn contract_state_for_testing() -> ContractState {{
-                    unsafe_new_contract_state()
-                }}
-
-
-                $empty_event_code$
-                impl ContractStateEventEmitter of EventEmitter<ContractState, Event> {{
-                    fn emit(ref self: ContractState, event: Event) {{
-                        let mut keys = Default::<array::Array>::default();
-                        let mut data = Default::<array::Array>::default();
-                        starknet::Event::append_keys_and_data(@event, ref keys, ref data);
-                        starknet::syscalls::emit_event_syscall(
-                            array::ArrayTrait::span(@keys),
-                            array::ArrayTrait::span(@data),
-                        ).unwrap_syscall()
-                    }}
-                }}
-            $vars_code$
-        ",
+            #[phantom]
+            pub struct Storage {{$storage_struct_members$
+            }}
+            "
         )
-        .as_str(),
-        UnorderedHashMap::from([
-            ("members_code".to_string(), RewriteNode::new_modified(members_code)),
-            ("vars_code".to_string(), RewriteNode::new_modified(vars_code)),
-            ("member_init_code".to_string(), RewriteNode::new_modified(members_init_code)),
-            ("empty_event_code".to_string(), RewriteNode::Text(empty_event_code.to_string())),
-        ]),
-    );
-    (storage_code, diagnostics)
-}
-
-/// The type of the mapping storage variable.
-enum MappingType {
-    /// Pedersen based.
-    Legacy,
-    /// Poseidon based.
-    NonLegacy,
-}
-
-/// Given a type, if it is of form `Map{Legacy,}::<K, V>`, returns `K` and `V` and the mapping type.
-/// Otherwise, returns None.
-fn try_extract_mapping_types(
-    db: &dyn SyntaxGroup,
-    type_ast: &ast::Expr,
-) -> Option<(ast::GenericArg, ast::GenericArg, MappingType)> {
-    let as_path = try_extract_matches!(type_ast, ast::Expr::Path)?;
-    let [ast::PathSegment::WithGenericArgs(segment)] = &as_path.elements(db)[..] else {
-        return None;
-    };
-    let ty = segment.ident(db).text(db);
-    if ty == "LegacyMap" || ty == "Map" {
-        let [key_ty, value_ty] = <[ast::GenericArg; 2]>::try_from(
-            segment.generic_args(db).generic_args(db).elements(db),
-        )
-        .ok()?;
-        Some((
-            key_ty,
-            value_ty,
-            if ty == "LegacyMap" { MappingType::Legacy } else { MappingType::NonLegacy },
-        ))
     } else {
-        None
+        "".to_string()
+    };
+    let storage_base_code =
+        handle_storage_interface_struct(db, &struct_ast, &configs, metadata).into_rewrite_node();
+    data.state_struct_code = RewriteNode::interpolate_patched(
+        &formatdoc!(
+            "
+            {storage_struct_code}
+            $storage_base_code$
+            pub struct {full_state_struct_name} {{$substorage_members_struct_code$
+            }}
+
+            impl {state_struct_name}Drop{generic_arg_str} of Drop<{full_state_struct_name}> {{}}
+
+            impl {state_struct_name}Deref{generic_arg_str} of \
+             core::ops::Deref<@{full_state_struct_name}> {{
+                type Target = starknet::storage::FlattenedStorage<Storage>;
+                fn deref(self: @{full_state_struct_name}) -> \
+             starknet::storage::FlattenedStorage<Storage> {{
+                    starknet::storage::FlattenedStorage {{}}
+                }}
+            }}
+            impl {state_struct_name}DerefMut{generic_arg_str} of \
+             core::ops::DerefMut<{full_state_struct_name}> {{
+                type Target = \
+             starknet::storage::FlattenedStorage<starknet::storage::Mutable<Storage>> ;
+                fn deref_mut(ref self: {full_state_struct_name}) -> \
+             starknet::storage::FlattenedStorage<starknet::storage::Mutable<Storage>> {{
+                    starknet::storage::FlattenedStorage {{}}
+                }}
+            }}
+            pub fn {unsafe_new_function_name}{generic_arg_str}() -> {full_state_struct_name} {{
+                {state_struct_name}{full_generic_arg_str} {{$substorage_members_init_code$
+                }}
+            }}
+            #[cfg(target: 'test')]
+            #[inline(always)]
+            pub fn {module_kind}_state_for_testing{generic_arg_str}() -> {full_state_struct_name} \
+             {{
+                {unsafe_new_function_name}{full_generic_arg_str}()
+            }}
+            ",
+        ),
+        &[
+            ("storage_base_code".to_string(), storage_base_code),
+            (
+                "storage_struct_members".to_string(),
+                RewriteNode::new_modified(storage_struct_members),
+            ),
+            (
+                "substorage_members_struct_code".to_string(),
+                RewriteNode::new_modified(substorage_members_struct_code),
+            ),
+            (
+                "substorage_members_init_code".to_string(),
+                RewriteNode::new_modified(substorage_members_init_code),
+            ),
+        ]
+        .into(),
+    )
+    .mapped(db, &struct_ast);
+}
+
+/// Returns the relevant code for a substorage storage member.
+fn get_substorage_member_code<'db>(
+    db: &'db dyn Database,
+    member: &ast::Member<'db>,
+    metadata: &MacroPluginMetadata<'_>,
+) -> Option<(RewriteNode<'db>, RewriteNode<'db>)> {
+    let member_visibility = if backwards_compatible_storage(metadata.edition) {
+        RewriteNode::text("pub")
+    } else {
+        RewriteNode::from_ast(&member.visibility(db))
+    };
+    match member.type_clause(db).ty(db) {
+        ast::Expr::Path(type_path) => {
+            let segments = type_path.segments(db);
+            let mut elements = segments.elements(db);
+            // The path has at least one element.
+            let last = elements.next_back().unwrap();
+            match last {
+                ast::PathSegment::Simple(segment)
+                    if segment.identifier(db).long(db) == STORAGE_STRUCT_NAME =>
+                {
+                    let component_path = RewriteNode::interspersed(
+                        elements.map(|e| RewriteNode::from_ast_trimmed(&e)),
+                        RewriteNode::text("::"),
+                    );
+
+                    Some((
+                        RewriteNode::interpolate_patched(
+                            &format!("\n$attributes$        $member_visibility$ $name$: $component_path$::{CONCRETE_COMPONENT_STATE_NAME},"),
+                            &[
+                                ("attributes".to_string(), RewriteNode::from_ast(&member.attributes(db))),
+                                (
+                                    "member_visibility".to_string(),
+                                    member_visibility,
+                                ),
+                                (
+                                    "name".to_string(),
+                                    RewriteNode::from_ast_trimmed(&member.name(db)),
+                                ),
+                                ("component_path".to_string(), component_path.clone()),
+                            ]
+                            .into(),
+                        ).mapped(db, member),
+                        RewriteNode::interpolate_patched(
+                            &format!("\n    $name$: \
+                             $component_path$::unsafe_new_component_state::<{CONTRACT_STATE_NAME}>(),\
+                             "),
+                            &[
+                                (
+                                    "name".to_string(),
+                                    RewriteNode::Copied(member.name(db).as_syntax_node()),
+                                ),
+                                ("component_path".to_string(), component_path),
+                            ]
+                            .into(),
+                        ).mapped(db, member),
+                    ))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 
-/// Generate getters and setters skeleton for a non-mapping member in the storage struct.
-fn handle_simple_storage_var(address: &str) -> String {
-    format!(
-        "
-    use $storage_var_name$::InternalContractStateTrait as $storage_var_name$ContractStateTrait;
-    mod $storage_var_name$ {{$extra_uses$
-        use starknet::SyscallResultTrait;
-        use starknet::SyscallResultTraitImpl;
-        use super;
-
-        #[derive(Copy, Drop)]
-        struct ContractState {{}}
-        trait InternalContractStateTrait {{
-            fn address(self: @ContractState) -> starknet::StorageBaseAddress;
-            fn read(self: @ContractState) -> $type_name$;
-            fn write(ref self: ContractState, value: $type_name$);
-        }}
-
-        impl InternalContractStateImpl of InternalContractStateTrait {{
-            fn address(self: @ContractState) -> starknet::StorageBaseAddress {{
-                starknet::storage_base_address_const::<{address}>()
-            }}
-            fn read(self: @ContractState) -> $type_name$ {{
-                // Only address_domain 0 is currently supported.
-                let address_domain = 0_u32;
-                starknet::StorageAccess::<$type_name$>::read(
-                    address_domain,
-                    self.address(),
-                ).unwrap_syscall()
-            }}
-            fn write(ref self: ContractState, value: $type_name$) {{
-                // Only address_domain 0 is currently supported.
-                let address_domain = 0_u32;
-                starknet::StorageAccess::<$type_name$>::write(
-                    address_domain,
-                    self.address(),
-                    value,
-                ).unwrap_syscall()
-            }}
-        }}
-    }}"
+/// Returns the relevant code for a storage member.
+fn get_simple_member_code<'db>(
+    db: &'db dyn Database,
+    member: &ast::Member<'db>,
+    metadata: &MacroPluginMetadata<'_>,
+) -> RewriteNode<'db> {
+    let member_visibility = if backwards_compatible_storage(metadata.edition) {
+        RewriteNode::text("pub")
+    } else {
+        RewriteNode::from_ast(&member.visibility(db))
+    };
+    let member_name = RewriteNode::from_ast_trimmed(&member.name(db));
+    RewriteNode::interpolate_patched(
+        "\n$attributes$        $member_visibility$ $member_name$: $member_type$,",
+        &[
+            ("attributes".to_string(), RewriteNode::from_ast(&member.attributes(db))),
+            ("member_visibility".to_string(), member_visibility),
+            ("member_name".to_string(), member_name),
+            (
+                "member_type".to_string(),
+                RewriteNode::from_ast_trimmed(&member.type_clause(db).ty(db)),
+            ),
+        ]
+        .into(),
     )
-}
-
-/// Generate getters and setters skeleton for a non-mapping member in the storage struct.
-fn handle_legacy_mapping_storage_var(address: &str) -> String {
-    format!(
-        "
-    use $storage_var_name$::InternalContractStateTrait as $storage_var_name$ContractStateTrait;
-    mod $storage_var_name$ {{$extra_uses$
-        use starknet::SyscallResultTrait;
-        use starknet::SyscallResultTraitImpl;
-        use super;
-
-        #[derive(Copy, Drop)]
-        struct ContractState {{}}
-        trait InternalContractStateTrait {{
-            fn address(self: @ContractState, key: $key_type$) -> starknet::StorageBaseAddress;
-            fn read(self: @ContractState, key: $key_type$) -> $value_type$;
-            fn write(ref self: ContractState, key: $key_type$, value: $value_type$);
-        }}
-
-        impl InternalContractStateImpl of InternalContractStateTrait {{
-            fn address(self: @ContractState, key: $key_type$) -> starknet::StorageBaseAddress {{
-                starknet::storage_base_address_from_felt252(
-                    hash::LegacyHash::<$key_type$>::hash({address}, key))
-            }}
-            fn read(self: @ContractState, key: $key_type$) -> $value_type$ {{
-                // Only address_domain 0 is currently supported.
-                let address_domain = 0_u32;
-                starknet::StorageAccess::<$value_type$>::read(
-                    address_domain,
-                    self.address(key),
-                ).unwrap_syscall()
-            }}
-            fn write(ref self: ContractState, key: $key_type$, value: $value_type$) {{
-                // Only address_domain 0 is currently supported.
-                let address_domain = 0_u32;
-                starknet::StorageAccess::<$value_type$>::write(
-                    address_domain,
-                    self.address(key),
-                    value,
-                ).unwrap_syscall()
-            }}
-        }}
-    }}"
-    )
+    .mapped(db, member)
 }

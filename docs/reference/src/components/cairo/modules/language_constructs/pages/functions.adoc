@@ -3,7 +3,7 @@
 A function is a unit of code that performs some logic. It is defined using the `fn` keyword.
 
 Examples of functions are:
-[source]
+[source,cairo]
 ----
 fn main() {
     let x = 3;
@@ -16,7 +16,7 @@ fn inc(x: u32) -> u32 {
 
 A function consists of 2 main parts: the function signature and the function body.
 For example,
-[source]
+[source,cairo]
 ----
 // Function signature |         | Body starts here
 //                    V         V
@@ -30,12 +30,20 @@ fn inc_n<T, const N>(x: T) -> T {
 The function signature defines the function name, the xref:generics.adoc[generic parameters],
 the parameters and the return type.
 
-[source,rust]
+[source,cairo]
 ----
 fn <name>[<<generic_parameters>>](<parameters>) [-> <return_type>]
 ----
 
-In the example above, the signature is `fn inc_n<T, const N>(x: T) \-> T`.
+In the example above, the signature is `fn inc_n<T, const N>(x: T) -> T`.
+
+[[generic_parameters]]
+=== Generic parameters
+
+Generic parameters are declared inside angle brackets (`<...>`) after the function name.
+They can include type parameters (like `T`) and const parameters (like `const N`).
+
+For more information, see xref:generics.adoc[Generics].
 
 === Function name
 
@@ -46,8 +54,8 @@ In the example above, the function name is `inc_n`.
 
 === Parameters
 
-Parameters define the types of the values that are passed to the function when it is called
-and define xref:variables.adoc[variables] to the function's body.
+Parameters define the types of values that are passed to the function when it is called
+and introduce xref:variables.adoc[variables] that are available in the function's body.
 Each such variable can be referred to using the parameter name to be used in the function body.
 
 The parameters are defined using a comma-separated list of `[<modifier>] <name>: <type>` items, enclosed by
@@ -63,24 +71,24 @@ and can be modified in the function.
 A parameter that is defined with the `ref` modifier, simulates a reference to the
 value passed to the function. It behaves similarly to a mutable variable, but mutating
 it also affects its value in the caller function. For example:
-[source,rust]
+[source,cairo]
 ----
     fn foo(mut x: u32, ref y: u32) {
         x *= 3;
         y = x + 1;
     }
 ----
-`x` is a mutable parameter and `y` is a reference parameter. See below an example of calling it.
+`x` is a mutable parameter and `y` is a reference parameter. See an example of calling it below.
 
 === Return type
 
 The return type defines the type of the value that is returned by the function when it is called.
-It is the type that appears in the signature after the `\->`.
+It is the type that appears in the signature after the `->`.
 
 Note that in Cairo, functions always return a value.
 When the function has no particular value it should return, it is common to return
 the xref:unit-type.adoc[unit type] (`()`).
-In this case, the return type can be omitted (including the `\->`).
+In this case, the return type can be omitted (including the `->`).
 
 In the example above, the return type is of type `T`.
 
@@ -90,7 +98,7 @@ In the example above, the return type is of type `T`.
 
 The function body is the code that is executed when the function is called.
 It is enclosed by the curly braces (`{...}`) and consists of a list of 0 or
-more xref:statements.adoc[statements], and an then an optional xref:expressions.adoc[expression]
+more xref:statements.adoc[statements], and then an optional xref:expressions.adoc[expression]
 which is called the "tail expression".
 
 The statements are executed one after the other in the defined order.
@@ -104,7 +112,107 @@ tail expression `x + N` whose value is the return value of the function.
 
 See xref:function-calls.adoc[Function calls].
 
-// TODO(yuval): mention methods/self?
-// TODO(yuval): mention panics/implicits? (it's part of the signature).
-// TODO(yuval): mention inline.
-// TODO(yuval): mention local compilability.
+== Methods and self
+
+Cairo supports _methods_, which are functions associated with a type.
+Methods are defined inside `trait` items.
+
+The first parameter of a method is often `self`, which represents the instance the method is called on.
+The `self` parameter can take several forms:
+
+* `self: T` — Takes ownership of the instance
+* `ref self: T` — Takes a mutable reference, allowing the method to modify the instance
+* `self: @T` — Takes a snapshot (immutable reference) of the instance
+
+[source,cairo]
+----
+#[derive(Drop)]
+struct Counter {
+    value: u32,
+}
+
+trait CounterTrait {
+    fn increment(ref self: Counter);
+    fn get_value(self: @Counter) -> u32;
+}
+
+impl CounterImpl of CounterTrait {
+    fn increment(ref self: Counter) {
+        self.value += 1;
+    }
+
+    fn get_value(self: @Counter) -> u32 {
+        *self.value
+    }
+}
+----
+
+Methods can be called using the dot notation:
+
+[source,cairo]
+----
+let mut counter = Counter { value: 0 };
+counter.increment();  // Calls increment with ref self
+let value = counter.get_value();  // Calls get_value with snapshot
+----
+
+== Function attributes
+
+=== Implicits and nopanic
+
+Functions can declare xref:implicit-arguments.adoc[implicit parameters] using the `implicits` keyword.
+These are system resources that are passed automatically by the compiler.
+
+The `nopanic` keyword indicates that a function cannot panic (abort execution).
+This is useful for external functions and safety guarantees.
+
+[source,cairo]
+----
+extern fn array_get<T>(
+    arr: @Array<T>, index: usize,
+) -> Option<Box<@T>> implicits(RangeCheck) nopanic;
+----
+
+In this example:
+
+* `implicits(RangeCheck)` — The function requires the `RangeCheck` implicit for bounds checking
+* `nopanic` — The function is guaranteed not to panic
+
+=== Inline
+
+The `#[inline]` attribute suggests to the compiler that a function should be inlined at its call sites.
+Inlining can improve performance by eliminating function call overhead, but may increase code size.
+
+[source,cairo]
+----
+#[inline]
+fn add_one(x: u32) -> u32 {
+    x + 1
+}
+----
+
+Inline behavior:
+
+* `#[inline(always)]` — Always inline this function
+* `#[inline(never)]` — Never inline this function
+* `#[inline]` — Attempt to inline - but compiler may decide to not do so.
+* No annotation - Let the compiler decide based on optimization heuristics.
+
+== Local compilability
+
+Cairo functions are _locally compilable_, meaning each function can be compiled independently without analyzing its callers or callees.
+This is achieved through explicit type annotations and the type system.
+
+Key aspects of local compilability:
+
+* **Explicit parameter types** — All parameter types must be explicitly declared
+* **Explicit return types** — Return types are explicitly declared
+* **No global type inference** — Type inference is limited to function bodies
+* **Independent compilation** — Functions can be type-checked and compiled in any order
+
+This design enables:
+
+* Faster compilation times
+* Better error messages with clear locations
+* Easier parallel compilation
+* More predictable behavior

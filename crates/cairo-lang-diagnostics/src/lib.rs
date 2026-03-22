@@ -1,11 +1,12 @@
-//! Diagnostics hold error information from around the compiler, associated with a location to the
+//! Diagnostics hold error information from around the compiler, associated with a location in the
 //! source files.
 
-mod diagnostics;
-mod location_marks;
-
-pub use self::diagnostics::{
-    format_diagnostics, skip_diagnostic, DiagnosticAdded, DiagnosticEntry, DiagnosticLocation,
-    Diagnostics, DiagnosticsBuilder, Maybe, ToMaybe, ToOption,
+pub use diagnostics::{
+    DiagnosticAdded, DiagnosticEntry, DiagnosticNote, Diagnostics, DiagnosticsBuilder,
+    FormattedDiagnosticEntry, Maybe, MaybeAsRef, PluginFileDiagnosticNotes, Severity, ToMaybe,
+    ToOption, UserLocationWithPluginNotes, format_diagnostics, skip_diagnostic,
 };
-pub use self::location_marks::get_location_marks;
+pub use error_code::{ErrorCode, OptionErrorCodeExt};
+
+mod diagnostics;
+mod error_code;

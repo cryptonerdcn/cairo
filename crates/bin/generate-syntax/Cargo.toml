@@ -4,11 +4,11 @@ version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license-file.workspace = true
+publish = false
 
 [dependencies]
 log.workspace = true
+tracing.workspace = true
 
-cairo-lang-utils = { path = "../../cairo-lang-utils", features = [
-    "env_logger",
-] }
-cairo-lang-syntax-codegen = { path = "../../cairo-lang-syntax-codegen" }
+cairo-lang-syntax-codegen = { path = "../../cairo-lang-syntax-codegen", version = "=2.16.0" }
+cairo-lang-utils = { path = "../../cairo-lang-utils", version = "=2.16.0", features = ["tracing"] }

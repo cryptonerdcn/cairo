@@ -2,11 +2,12 @@ use crate::extensions::lib_func::{
     LibfuncSignature, OutputVarInfo, SierraApChange, SignatureOnlyGenericLibfunc,
     SignatureSpecializationContext,
 };
+use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::types::{
     GenericTypeArgGenericType, GenericTypeArgGenericTypeWrapper, TypeInfo,
 };
 use crate::extensions::{
-    args_as_single_type, NamedType, OutputVarReferenceInfo, SpecializationError,
+    NamedType, OutputVarReferenceInfo, SpecializationError, args_as_single_type,
 };
 use crate::ids::{ConcreteTypeId, GenericTypeId};
 use crate::program::GenericArg;
@@ -19,11 +20,18 @@ impl GenericTypeArgGenericType for NonZeroTypeWrapped {
 
     fn calc_info(
         &self,
+        _context: &dyn TypeSpecializationContext,
         long_id: crate::program::ConcreteTypeLongId,
-        TypeInfo { zero_sized, storable, droppable, duplicatable, .. }: TypeInfo,
+        wrapped_info: &TypeInfo,
     ) -> Result<TypeInfo, SpecializationError> {
-        if storable {
-            Ok(TypeInfo { long_id, zero_sized, storable, droppable, duplicatable })
+        if wrapped_info.storable {
+            Ok(TypeInfo {
+                long_id,
+                zero_sized: wrapped_info.zero_sized,
+                storable: true,
+                droppable: wrapped_info.droppable,
+                duplicatable: wrapped_info.duplicatable,
+            })
         } else {
             Err(SpecializationError::UnsupportedGenericArg)
         }
@@ -52,9 +60,9 @@ impl SignatureOnlyGenericLibfunc for UnwrapNonZeroLibfunc {
     ) -> Result<LibfuncSignature, SpecializationError> {
         let ty = args_as_single_type(args)?;
         Ok(LibfuncSignature::new_non_branch(
-            vec![nonzero_ty(context, &ty)?],
+            vec![nonzero_ty(context, ty)?],
             vec![OutputVarInfo {
-                ty,
+                ty: ty.clone(),
                 ref_info: OutputVarReferenceInfo::SameAsParam { param_idx: 0 },
             }],
             SierraApChange::Known { new_vars_only: true },

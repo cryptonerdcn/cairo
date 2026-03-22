@@ -1,6 +1,6 @@
+use cairo_lang_test_utils::test;
 use cairo_lang_utils::unordered_hash_set::UnorderedHashSet;
 use pretty_assertions::assert_eq;
-use test_log::test;
 
 use super::KnownStack;
 
@@ -21,7 +21,7 @@ fn assert_eq_stacks(a: &KnownStack, b: &KnownStack) {
     for (var, a_index) in a.variables_on_stack.iter() {
         assert_eq!(
             a.offset - *a_index,
-            b.offset - b.variables_on_stack[var.clone()],
+            b.offset - b.variables_on_stack[var],
             "Wrong value found for {var}.\na: {a:?}\nb: {b:?}"
         );
     }

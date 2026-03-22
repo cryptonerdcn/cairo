@@ -1,53 +1,88 @@
-use cairo_lang_diagnostics::DiagnosticLocation;
-use cairo_lang_filesystem::span::TextSpan;
-use cairo_lang_syntax::node::ids::SyntaxStablePtrId;
-use cairo_lang_syntax::node::TypedSyntaxNode;
+use std::fmt;
 
-use crate::db::DefsGroup;
-use crate::ids::ModuleFileId;
+use cairo_lang_debug::DebugWithDb;
+use cairo_lang_filesystem::ids::{FileId, SpanInFile};
+use cairo_lang_filesystem::span::{TextSpan, TextWidth};
+use cairo_lang_proc_macros::HeapSize;
+use cairo_lang_syntax::node::ids::SyntaxStablePtrId;
+use cairo_lang_syntax::node::{SyntaxNode, TypedSyntaxNode};
+use salsa::Database;
 
 /// A stable location of a real, concrete syntax.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
-pub struct StableLocation {
-    pub module_file_id: ModuleFileId,
-    pub stable_ptr: SyntaxStablePtrId,
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, HeapSize, salsa::Update)]
+pub struct StableLocation<'db> {
+    stable_ptr: SyntaxStablePtrId<'db>,
+    /// An optional inner span of the stable location. Useful for diagnostics caused by inline
+    /// macros, see [crate::plugin::PluginDiagnostic] for more information. The tuple is (offset,
+    /// width).
+    inner_span: Option<(TextWidth, TextWidth)>,
 }
-impl StableLocation {
-    pub fn new(module_file_id: ModuleFileId, stable_ptr: SyntaxStablePtrId) -> Self {
-        Self { module_file_id, stable_ptr }
+
+impl<'db> StableLocation<'db> {
+    pub fn new(stable_ptr: SyntaxStablePtrId<'db>) -> Self {
+        Self { stable_ptr, inner_span: None }
     }
 
-    pub fn from_ast<TNode: TypedSyntaxNode>(module_file_id: ModuleFileId, node: &TNode) -> Self {
-        Self { module_file_id, stable_ptr: node.as_syntax_node().stable_ptr() }
+    pub fn with_inner_span(
+        stable_ptr: SyntaxStablePtrId<'db>,
+        inner_span: (TextWidth, TextWidth),
+    ) -> Self {
+        Self { stable_ptr, inner_span: Some(inner_span) }
     }
 
-    /// Returns the [DiagnosticLocation] that corresponds to the [StableLocation].
-    pub fn diagnostic_location(&self, db: &dyn DefsGroup) -> DiagnosticLocation {
-        let file_id =
-            db.module_file(self.module_file_id).expect("Module in diagnostic does not exist");
-        let syntax_node = db
-            .file_syntax(file_id)
-            .expect("File for diagnostic not found")
-            .as_syntax_node()
-            .lookup_ptr(db.upcast(), self.stable_ptr);
-        DiagnosticLocation { file_id, span: syntax_node.span_without_trivia(db.upcast()) }
+    pub fn file_id(&self, db: &'db dyn Database) -> FileId<'db> {
+        self.stable_ptr.file_id(db)
     }
 
-    /// Returns the [DiagnosticLocation] that corresponds to the [StableLocation].
-    pub fn diagnostic_location_until(
+    pub fn from_ast<TNode: TypedSyntaxNode<'db>>(db: &'db dyn Database, node: &TNode) -> Self {
+        Self::new(node.as_syntax_node().stable_ptr(db))
+    }
+
+    /// Returns the [SyntaxNode] that corresponds to the [StableLocation].
+    pub fn syntax_node(&self, db: &'db dyn Database) -> SyntaxNode<'db> {
+        self.stable_ptr.lookup(db)
+    }
+
+    /// Returns the [SyntaxStablePtrId] of the [StableLocation].
+    pub fn stable_ptr(&self) -> SyntaxStablePtrId<'db> {
+        self.stable_ptr
+    }
+
+    /// Returns the [SpanInFile] that corresponds to the [StableLocation].
+    pub fn span_in_file(&self, db: &'db dyn Database) -> SpanInFile<'db> {
+        match self.inner_span {
+            Some((start, width)) => {
+                let start = self.syntax_node(db).offset(db).add_width(start);
+                SpanInFile {
+                    file_id: self.file_id(db),
+                    span: TextSpan::new_with_width(start, width),
+                }
+            }
+            None => {
+                let syntax_node = self.syntax_node(db);
+                SpanInFile { file_id: self.file_id(db), span: syntax_node.span_without_trivia(db) }
+            }
+        }
+    }
+
+    /// Returns the [SpanInFile] that starts at the [StableLocation], and ends at the given
+    /// [SyntaxStablePtrId].
+    pub fn span_in_file_until(
         &self,
-        db: &dyn DefsGroup,
-        until_stable_ptr: SyntaxStablePtrId,
-    ) -> DiagnosticLocation {
-        let syntax_db = db.upcast();
-        let file_id =
-            db.module_file(self.module_file_id).expect("Module in diagnostic does not exist");
-        let root_node =
-            db.file_syntax(file_id).expect("File for diagnostic not found").as_syntax_node();
-        let start =
-            root_node.lookup_ptr(syntax_db, self.stable_ptr).span_start_without_trivia(syntax_db);
-        let end =
-            root_node.lookup_ptr(syntax_db, until_stable_ptr).span_end_without_trivia(syntax_db);
-        DiagnosticLocation { file_id, span: TextSpan { start, end } }
+        db: &'db dyn Database,
+        until_stable_ptr: SyntaxStablePtrId<'db>,
+    ) -> SpanInFile<'db> {
+        let start = self.stable_ptr.lookup(db).span_start_without_trivia(db);
+        let end = until_stable_ptr.lookup(db).span_end_without_trivia(db);
+        SpanInFile { file_id: self.stable_ptr.file_id(db), span: TextSpan::new(start, end) }
+    }
+}
+
+impl<'db> DebugWithDb<'db> for StableLocation<'db> {
+    type Db = dyn Database;
+
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, db: &'db dyn Database) -> fmt::Result {
+        let diag_location = self.span_in_file(db);
+        diag_location.fmt_location(f, db)
     }
 }

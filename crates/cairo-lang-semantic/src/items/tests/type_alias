@@ -1,9 +1,9 @@
 //! > Test simple struct type alias.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(a: RenamedStruct) -> felt252 {
     a.a
 }
@@ -13,7 +13,7 @@ foo
 
 //! > module_code
 struct MyStruct {
-    a: felt252
+    a: felt252,
 }
 
 type RenamedStruct = MyStruct;
@@ -25,9 +25,9 @@ type RenamedStruct = MyStruct;
 //! > Test simple enum type alias.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(a: RenamedEnum) -> felt252 {
     match a {
         MyEnum::f(v) => v,
@@ -39,7 +39,7 @@ foo
 
 //! > module_code
 enum MyEnum {
-    f: felt252
+    f: felt252,
 }
 
 type RenamedEnum = MyEnum;
@@ -51,9 +51,9 @@ type RenamedEnum = MyEnum;
 //! > Test tuple type alias.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(a: RenamedTuple) -> felt252 {
     let (v, _) = a;
     v
@@ -72,13 +72,13 @@ type RenamedTuple = (felt252, u128);
 //! > Test generic enum type alias.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(a: OptionFelt252) -> felt252 {
     match a {
-        Option::Some(v) => v,
-        Option::None(_) => 1,
+        Some(v) => v,
+        None => 1,
     }
 }
 
@@ -95,10 +95,10 @@ type OptionFelt252 = Option::<felt252>;
 //! > Test generic tuple type alias.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
-fn foo(a: RenamedTuple::<u128>) -> u128 {
+//! > function_code
+fn foo(a: RenamedTuple<u128>) -> u128 {
     let (_, v) = a;
     v
 }
@@ -116,10 +116,10 @@ type RenamedTuple<T> = (felt252, T);
 //! > Test type alias chain.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
-fn foo(a: A::<bool>) -> (felt252, u128, bool) {
+//! > function_code
+fn foo(a: A<bool>) -> (felt252, u128, bool) {
     a
 }
 
@@ -137,10 +137,10 @@ type B<P1, P2, P3> = (P1, P3, P2);
 //! > Test type alias wrong generic argument.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
-fn foo(a: A::<5>) -> felt252 {
+//! > function_code
+fn foo(a: A<5>) -> felt252 {
     let (v, _) = a;
     v
 }
@@ -152,19 +152,19 @@ foo
 type A<T> = (felt252, T);
 
 //! > expected_diagnostics
-error: Unknown type.
- --> lib.cairo:2:15
-fn foo(a: A::<5>) -> felt252 {
-              ^
+error[E2006]: Unknown type.
+ --> lib.cairo:2:13
+fn foo(a: A<5>) -> felt252 {
+            ^
 
 //! > ==========================================================================
 
 //! > Test type alias cycle.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
+//! > function_code
 fn foo(a: A) -> B {
     a
 }
@@ -177,12 +177,12 @@ type A = B;
 type B = A;
 
 //! > expected_diagnostics
-error: Cycle detected while resolving 'type alias' items.
+error[E2026]: Cycle detected while resolving type-alias/impl-type items.
  --> lib.cairo:1:6
 type A = B;
      ^
 
-error: Cycle detected while resolving 'type alias' items.
+error[E2026]: Cycle detected while resolving type-alias/impl-type items.
  --> lib.cairo:2:6
 type B = A;
      ^
@@ -192,9 +192,9 @@ type B = A;
 //! > Test type alias cycle of size 1.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
+//! > function_code
 fn foo(a: A) -> A {
     a
 }
@@ -206,7 +206,7 @@ foo
 type A = A;
 
 //! > expected_diagnostics
-error: Cycle detected while resolving 'type alias' items.
+error[E2026]: Cycle detected while resolving type-alias/impl-type items.
  --> lib.cairo:1:6
 type A = A;
      ^
@@ -216,9 +216,9 @@ type A = A;
 //! > Test simple unknown type alias.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
+//! > function_code
 fn foo(a: Alias) -> felt252 {
     a.a
 }
@@ -230,7 +230,7 @@ foo
 type Alias = bad_type;
 
 //! > expected_diagnostics
-error: Type not found.
+error[E0006]: Type not found.
  --> lib.cairo:1:14
 type Alias = bad_type;
-             ^******^
+             ^^^^^^^^

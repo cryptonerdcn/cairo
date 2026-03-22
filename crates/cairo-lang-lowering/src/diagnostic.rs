@@ -1,121 +1,280 @@
 use cairo_lang_defs::diagnostic_utils::StableLocation;
-use cairo_lang_defs::ids::ModuleFileId;
 use cairo_lang_diagnostics::{
-    DiagnosticAdded, DiagnosticEntry, DiagnosticLocation, Diagnostics, DiagnosticsBuilder,
+    DiagnosticAdded, DiagnosticEntry, DiagnosticNote, DiagnosticsBuilder, Severity, error_code,
 };
-use cairo_lang_semantic::db::SemanticGroup;
+use cairo_lang_filesystem::ids::SpanInFile;
+use cairo_lang_semantic as semantic;
+use cairo_lang_semantic::corelib::LiteralError;
 use cairo_lang_semantic::expr::inference::InferenceError;
 use cairo_lang_syntax::node::ids::SyntaxStablePtrId;
+use salsa::Database;
 
-pub struct LoweringDiagnostics {
-    pub diagnostics: DiagnosticsBuilder<LoweringDiagnostic>,
-    pub module_file_id: ModuleFileId,
-}
-impl LoweringDiagnostics {
-    pub fn new(module_file_id: ModuleFileId) -> Self {
-        Self { module_file_id, diagnostics: DiagnosticsBuilder::default() }
-    }
-    pub fn build(self) -> Diagnostics<LoweringDiagnostic> {
-        self.diagnostics.build()
-    }
-    pub fn report(
+use crate::Location;
+
+pub type LoweringDiagnostics<'db> = DiagnosticsBuilder<'db, LoweringDiagnostic<'db>>;
+pub trait LoweringDiagnosticsBuilder<'db> {
+    fn report(
         &mut self,
-        stable_ptr: SyntaxStablePtrId,
-        kind: LoweringDiagnosticKind,
+        stable_ptr: impl Into<SyntaxStablePtrId<'db>>,
+        kind: LoweringDiagnosticKind<'db>,
     ) -> DiagnosticAdded {
-        self.report_by_location(StableLocation::new(self.module_file_id, stable_ptr), kind)
+        self.report_by_location(Location::new(StableLocation::new(stable_ptr.into())), kind)
     }
-    pub fn report_by_location(
+    fn report_by_location(
         &mut self,
-        stable_location: StableLocation,
-        kind: LoweringDiagnosticKind,
+        location: Location<'db>,
+        kind: LoweringDiagnosticKind<'db>,
+    ) -> DiagnosticAdded;
+}
+impl<'db> LoweringDiagnosticsBuilder<'db> for LoweringDiagnostics<'db> {
+    fn report_by_location(
+        &mut self,
+        location: Location<'db>,
+        kind: LoweringDiagnosticKind<'db>,
     ) -> DiagnosticAdded {
-        self.diagnostics.add(LoweringDiagnostic { stable_location, kind })
+        self.add(LoweringDiagnostic { location, kind })
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct LoweringDiagnostic {
-    pub stable_location: StableLocation,
-    pub kind: LoweringDiagnosticKind,
+#[derive(Clone, Debug, Eq, Hash, PartialEq, salsa::Update)]
+pub struct LoweringDiagnostic<'db> {
+    pub location: Location<'db>,
+    pub kind: LoweringDiagnosticKind<'db>,
 }
-impl DiagnosticEntry for LoweringDiagnostic {
-    type DbType = dyn SemanticGroup;
 
-    fn format(&self, db: &Self::DbType) -> String {
+impl<'db> DiagnosticEntry<'db> for LoweringDiagnostic<'db> {
+    fn format(&self, db: &'db dyn Database) -> String {
         match &self.kind {
             LoweringDiagnosticKind::Unreachable { .. } => "Unreachable code".into(),
-            LoweringDiagnosticKind::NonZeroValueInMatch => {
-                "Match with a non-zero value is not supported.".into()
+            LoweringDiagnosticKind::VariableMoved { .. } => "Variable was previously moved.".into(),
+            LoweringDiagnosticKind::VariableNotDropped { .. } => "Variable not dropped.".into(),
+            LoweringDiagnosticKind::DesnappingANonCopyableType { .. } => {
+                "Cannot desnap a non copyable type.".into()
             }
-            LoweringDiagnosticKind::OnlyMatchZeroIsSupported => {
-                "Only match zero (match ... { 0 => ..., _ => ... }) is currently supported.".into()
-            }
-            LoweringDiagnosticKind::VariableMoved { inference_error } => {
-                format!("Variable was previously moved. {}", inference_error.format(db))
-            }
-            LoweringDiagnosticKind::VariableNotDropped { drop_err, destruct_err } => {
-                format!(
-                    "Variable not dropped. {}. {}.",
-                    drop_err.format(db),
-                    destruct_err.format(db)
-                )
-            }
-            LoweringDiagnosticKind::DesnappingANonCopyableType { inference_error } => {
-                format!("Cannot desnap a non copyable type. {}", inference_error.format(db))
-            }
-            LoweringDiagnosticKind::UnsupportedMatchedValue => "Unsupported matched value. \
-                                                                Currently, only matches on enums \
-                                                                and felt252s are supported."
-                .into(),
-            LoweringDiagnosticKind::UnsupportedMatchArms => "Unsupported match. Currently, \
-                                                             matches require one arm per variant, \
-                                                             in the order of variant definition."
-                .into(),
-            LoweringDiagnosticKind::UnsupportedMatchArmNotAVariant => {
-                "Unsupported match arm - not a variant.".into()
-            }
-            LoweringDiagnosticKind::UnsupportedMatchArmOutOfOrder => {
-                "Unsupported match arm - variants must be the same order as enum declaration."
-                    .into()
-            }
+            LoweringDiagnosticKind::MatchError(match_err) => match_err.format(),
             LoweringDiagnosticKind::CannotInlineFunctionThatMightCallItself => {
                 "Cannot inline a function that might call itself.".into()
             }
             LoweringDiagnosticKind::MemberPathLoop => {
                 "Currently, loops must change the entire variable.".into()
             }
+            LoweringDiagnosticKind::UnexpectedError => {
+                "Unexpected error has occurred, Please submit a full bug report. \
+                See https://github.com/starkware-libs/cairo/issues/new/choose for instructions.\
+                "
+                .into()
+            }
+            LoweringDiagnosticKind::NoPanicFunctionCycle => {
+                "Call cycle of `nopanic` functions is not allowed.".into()
+            }
+            LoweringDiagnosticKind::LiteralError(literal_error) => literal_error.format(db),
+            LoweringDiagnosticKind::UnsupportedPattern => {
+                "Inner patterns are not allowed in this context.".into()
+            }
+            LoweringDiagnosticKind::Unsupported => "Unsupported feature.".into(),
+            LoweringDiagnosticKind::FixedSizeArrayNonCopyableType => {
+                "Fixed size array inner type must implement the `Copy` trait when the array size \
+                 is greater than 1."
+                    .into()
+            }
+            LoweringDiagnosticKind::EmptyRepeatedElementFixedSizeArray => {
+                "Fixed size array repeated element size must be greater than 0.".into()
+            }
         }
     }
 
-    #[allow(unreachable_patterns, clippy::single_match)]
-    fn location(&self, db: &Self::DbType) -> DiagnosticLocation {
-        match &self.kind {
-            LoweringDiagnosticKind::Unreachable { last_statement_ptr } => {
-                return self
-                    .stable_location
-                    .diagnostic_location_until(db.upcast(), *last_statement_ptr);
-            }
-            _ => {}
+    fn severity(&self) -> Severity {
+        match self.kind {
+            LoweringDiagnosticKind::Unreachable { .. }
+            | LoweringDiagnosticKind::MatchError(MatchError {
+                kind: _,
+                error: MatchDiagnostic::UnreachableMatchArm,
+            }) => Severity::Warning,
+            _ => Severity::Error,
         }
-        self.stable_location.diagnostic_location(db.upcast())
+    }
+
+    fn notes(&self, _db: &dyn Database) -> &[DiagnosticNote<'_>] {
+        &self.location.notes
+    }
+
+    fn location(&self, db: &'db dyn Database) -> SpanInFile<'db> {
+        if let LoweringDiagnosticKind::Unreachable { block_end_ptr } = &self.kind {
+            return self.location.stable_location.span_in_file_until(db, *block_end_ptr);
+        }
+        self.location.stable_location.span_in_file(db)
+    }
+
+    fn error_code(&self) -> Option<cairo_lang_diagnostics::ErrorCode> {
+        Some(match &self.kind {
+            LoweringDiagnosticKind::Unreachable { .. } => error_code!(E3000),
+            LoweringDiagnosticKind::VariableMoved { .. } => error_code!(E3001),
+            LoweringDiagnosticKind::VariableNotDropped { .. } => error_code!(E3002),
+            LoweringDiagnosticKind::DesnappingANonCopyableType { .. } => error_code!(E3003),
+            LoweringDiagnosticKind::MatchError(_) => error_code!(E3004),
+            LoweringDiagnosticKind::CannotInlineFunctionThatMightCallItself => error_code!(E3005),
+            LoweringDiagnosticKind::MemberPathLoop => error_code!(E3006),
+            LoweringDiagnosticKind::UnexpectedError => error_code!(E3007),
+            LoweringDiagnosticKind::NoPanicFunctionCycle => error_code!(E3008),
+            LoweringDiagnosticKind::LiteralError(_) => error_code!(E3009),
+            LoweringDiagnosticKind::UnsupportedPattern => error_code!(E3010),
+            LoweringDiagnosticKind::Unsupported => error_code!(E3011),
+            LoweringDiagnosticKind::FixedSizeArrayNonCopyableType => error_code!(E3012),
+            LoweringDiagnosticKind::EmptyRepeatedElementFixedSizeArray => error_code!(E3013),
+        })
+    }
+
+    fn is_same_kind(&self, other: &Self) -> bool {
+        other.kind == self.kind
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum LoweringDiagnosticKind {
-    Unreachable { last_statement_ptr: SyntaxStablePtrId },
-    // TODO(lior): Remove once supported.
-    NonZeroValueInMatch,
-    // TODO(lior): Remove once supported.
-    OnlyMatchZeroIsSupported,
-    VariableMoved { inference_error: InferenceError },
-    VariableNotDropped { drop_err: InferenceError, destruct_err: InferenceError },
-    DesnappingANonCopyableType { inference_error: InferenceError },
-    UnsupportedMatchedValue,
-    UnsupportedMatchArms,
-    UnsupportedMatchArmNotAVariant,
-    UnsupportedMatchArmOutOfOrder,
+impl<'db> MatchError<'db> {
+    fn format(&self) -> String {
+        match (&self.error, &self.kind) {
+            (MatchDiagnostic::UnsupportedMatchedType(matched_type), MatchKind::Match) => {
+                format!("Unsupported matched type. Type: `{matched_type}`.")
+            }
+            (MatchDiagnostic::UnsupportedMatchedType(matched_type), MatchKind::IfLet) => {
+                format!("Unsupported type in if-let. Type: `{matched_type}`.")
+            }
+            (MatchDiagnostic::UnsupportedMatchedType(matched_type), MatchKind::WhileLet(_, _)) => {
+                format!("Unsupported type in while-let. Type: `{matched_type}`.")
+            }
+            (MatchDiagnostic::UnsupportedMatchedValueTuple, MatchKind::Match) => {
+                "Unsupported matched value. Currently, match on tuples only supports enums as \
+                 tuple members."
+                    .into()
+            }
+            (MatchDiagnostic::UnsupportedMatchedValueTuple, MatchKind::IfLet) => {
+                "Unsupported value in if-let. Currently, if-let on tuples only supports enums as \
+                 tuple members."
+                    .into()
+            }
+            (MatchDiagnostic::UnsupportedMatchedValueTuple, MatchKind::WhileLet(_, _)) => {
+                "Unsupported value in while-let. Currently, while-let on tuples only supports \
+                 enums as tuple members."
+                    .into()
+            }
+            (MatchDiagnostic::UnsupportedMatchArmNotAVariant, _) => {
+                "Unsupported pattern - not a variant.".into()
+            }
+            (MatchDiagnostic::UnsupportedMatchArmNotATuple, _) => {
+                "Unsupported pattern - not a tuple.".into()
+            }
+            (MatchDiagnostic::UnsupportedMatchArmNotALiteral, MatchKind::Match) => {
+                "Unsupported match arm - not a literal.".into()
+            }
+            (MatchDiagnostic::UnsupportedMatchArmNonSequential, MatchKind::Match) => {
+                "Unsupported match - numbers must be sequential starting from 0.".into()
+            }
+            (
+                MatchDiagnostic::UnsupportedMatchArmNotALiteral
+                | MatchDiagnostic::UnsupportedMatchArmNonSequential,
+                MatchKind::IfLet | MatchKind::WhileLet(_, _),
+            ) => unreachable!("Numeric values are not supported in if/while-let conditions."),
+            (MatchDiagnostic::NonExhaustiveMatch(variant), MatchKind::Match) => {
+                format!("Match is non-exhaustive: `{variant}` not covered.")
+            }
+            (MatchDiagnostic::NonExhaustiveMatch(_), MatchKind::IfLet) => {
+                unreachable!("If-let is not required to be exhaustive.")
+            }
+            (MatchDiagnostic::NonExhaustiveMatch(_), MatchKind::WhileLet(_, _)) => {
+                unreachable!("While-let is not required to be exhaustive.")
+            }
+            (MatchDiagnostic::UnreachableMatchArm, MatchKind::Match) => {
+                "Unreachable pattern arm.".into()
+            }
+            (MatchDiagnostic::UnreachableMatchArm, MatchKind::IfLet) => {
+                "Unreachable clause.".into()
+            }
+            (MatchDiagnostic::UnreachableMatchArm, MatchKind::WhileLet(_, _)) => {
+                unreachable!("While-let does not have two arms.")
+            }
+            (MatchDiagnostic::UnsupportedNumericInLetCondition, MatchKind::Match) => {
+                unreachable!("Numeric values are supported in match conditions.")
+            }
+            (MatchDiagnostic::UnsupportedNumericInLetCondition, MatchKind::IfLet) => {
+                "Numeric values are not supported in if-let conditions.".into()
+            }
+            (MatchDiagnostic::UnsupportedNumericInLetCondition, MatchKind::WhileLet(_, _)) => {
+                "Numeric values are not supported in while-let conditions.".into()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, salsa::Update)]
+pub enum LoweringDiagnosticKind<'db> {
+    Unreachable { block_end_ptr: SyntaxStablePtrId<'db> },
+    VariableMoved { inference_error: InferenceError<'db> },
+    VariableNotDropped { drop_err: InferenceError<'db>, destruct_err: InferenceError<'db> },
+    MatchError(MatchError<'db>),
+    DesnappingANonCopyableType { inference_error: InferenceError<'db> },
+    UnexpectedError,
     CannotInlineFunctionThatMightCallItself,
     MemberPathLoop,
+    NoPanicFunctionCycle,
+    LiteralError(LiteralError<'db>),
+    FixedSizeArrayNonCopyableType,
+    EmptyRepeatedElementFixedSizeArray,
+    UnsupportedPattern,
+    Unsupported,
+}
+
+/// Error in a match-like construct.
+/// contains which construct the error occurred in and the error itself.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, salsa::Update)]
+pub struct MatchError<'db> {
+    pub kind: MatchKind<'db>,
+    pub error: MatchDiagnostic,
+}
+
+/// The type of branch construct the error occurred in.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum MatchKind<'db> {
+    Match,
+    IfLet,
+    WhileLet(semantic::ExprId, SyntaxStablePtrId<'db>),
+}
+
+unsafe impl<'db> salsa::Update for MatchKind<'db> {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value = unsafe { &mut *old_pointer };
+        match (old_value, &new_value) {
+            (MatchKind::Match, MatchKind::Match) | (MatchKind::IfLet, MatchKind::IfLet) => false,
+            (MatchKind::WhileLet(expr, end_ptr), MatchKind::WhileLet(new_expr, new_end_ptr)) => {
+                if unsafe { SyntaxStablePtrId::maybe_update(end_ptr, *new_end_ptr) } {
+                    *expr = *new_expr;
+                    true
+                } else if expr != new_expr {
+                    *end_ptr = *new_end_ptr;
+                    *expr = *new_expr;
+                    true
+                } else {
+                    false
+                }
+            }
+            (old_value, new_value) => {
+                *old_value = *new_value;
+                true
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, salsa::Update)]
+pub enum MatchDiagnostic {
+    /// TODO(TomerStarkware): Get rid of the string and pass the type information directly.
+    UnsupportedMatchedType(String),
+    UnsupportedMatchedValueTuple,
+    UnsupportedMatchArmNotAVariant,
+    UnsupportedMatchArmNotATuple,
+
+    UnreachableMatchArm,
+    NonExhaustiveMatch(String),
+
+    UnsupportedMatchArmNotALiteral,
+    UnsupportedMatchArmNonSequential,
+    UnsupportedNumericInLetCondition,
 }

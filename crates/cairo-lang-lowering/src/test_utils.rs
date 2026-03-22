@@ -1,73 +1,82 @@
-use std::sync::Arc;
+use std::sync::{LazyLock, Mutex};
 
-use cairo_lang_defs::db::{DefsDatabase, DefsGroup, HasMacroPlugins};
-use cairo_lang_defs::plugin::MacroPlugin;
-use cairo_lang_filesystem::db::{
-    init_dev_corelib, init_files_group, AsFilesGroupMut, FilesDatabase, FilesGroup,
-};
+use cairo_lang_debug::DebugWithDb;
+use cairo_lang_defs::db::{init_defs_group, init_external_files};
+use cairo_lang_filesystem::db::{init_dev_corelib, init_files_group};
 use cairo_lang_filesystem::detect::detect_corelib;
-use cairo_lang_parser::db::ParserDatabase;
-use cairo_lang_plugins::get_default_plugins;
-use cairo_lang_semantic::db::{SemanticDatabase, SemanticGroup, SemanticGroupEx};
-use cairo_lang_syntax::node::db::{SyntaxDatabase, SyntaxGroup};
-use cairo_lang_utils::Upcast;
+use cairo_lang_filesystem::flag::{Flag, FlagsGroup};
+use cairo_lang_filesystem::ids::FlagLongId;
+use cairo_lang_semantic::db::{PluginSuiteInput, init_semantic_group};
+use cairo_lang_semantic::inline_macros::get_default_plugin_suite;
+use salsa::Database;
 
-use crate::db::{LoweringDatabase, LoweringGroup};
+use crate::Lowered;
+use crate::db::init_lowering_group;
+use crate::fmt::LoweredFormatter;
+use crate::optimizations::config::Optimizations;
+use crate::utils::InliningStrategy;
 
-#[salsa::database(
-    LoweringDatabase,
-    SemanticDatabase,
-    DefsDatabase,
-    ParserDatabase,
-    SyntaxDatabase,
-    FilesDatabase
-)]
+#[salsa::db]
+#[derive(Clone)]
 pub struct LoweringDatabaseForTesting {
     storage: salsa::Storage<LoweringDatabaseForTesting>,
 }
+#[salsa::db]
 impl salsa::Database for LoweringDatabaseForTesting {}
-impl Default for LoweringDatabaseForTesting {
-    fn default() -> Self {
-        let mut res = Self { storage: Default::default() };
+
+impl LoweringDatabaseForTesting {
+    pub fn new() -> Self {
+        let mut res = LoweringDatabaseForTesting { storage: Default::default() };
+        init_external_files(&mut res);
         init_files_group(&mut res);
-        res.set_semantic_plugins(get_default_plugins());
+        init_defs_group(&mut res);
+        init_semantic_group(&mut res);
+
+        res.set_default_plugins_from_suite(get_default_plugin_suite());
+
         let corelib_path = detect_corelib().expect("Corelib not found in default location.");
         init_dev_corelib(&mut res, corelib_path);
+        init_lowering_group(
+            &mut res,
+            Optimizations::enabled_with_default_movable_functions(InliningStrategy::Default),
+            None,
+        );
         res
     }
-}
-impl AsFilesGroupMut for LoweringDatabaseForTesting {
-    fn as_files_group_mut(&mut self) -> &mut (dyn FilesGroup + 'static) {
-        self
+
+    /// Snapshots the db.
+    pub fn snapshot(&self) -> LoweringDatabaseForTesting {
+        self.clone()
     }
 }
-impl Upcast<dyn FilesGroup> for LoweringDatabaseForTesting {
-    fn upcast(&self) -> &(dyn FilesGroup + 'static) {
-        self
+
+pub static SHARED_DB: LazyLock<Mutex<LoweringDatabaseForTesting>> =
+    LazyLock::new(|| Mutex::new(LoweringDatabaseForTesting::new()));
+pub static SHARED_DB_FUTURE_SIERRA: LazyLock<Mutex<LoweringDatabaseForTesting>> =
+    LazyLock::new(|| {
+        let mut db = LoweringDatabaseForTesting::new();
+        db.set_flag(FlagLongId(Flag::FUTURE_SIERRA.into()), Some(Flag::FutureSierra(true)));
+        Mutex::new(db)
+    });
+impl LoweringDatabaseForTesting {
+    pub fn with_future_sierra() -> Self {
+        SHARED_DB_FUTURE_SIERRA.lock().unwrap().snapshot()
     }
 }
-impl Upcast<dyn SyntaxGroup> for LoweringDatabaseForTesting {
-    fn upcast(&self) -> &(dyn SyntaxGroup + 'static) {
-        self
+impl Default for LoweringDatabaseForTesting {
+    fn default() -> Self {
+        SHARED_DB.lock().unwrap().snapshot()
     }
 }
-impl Upcast<dyn DefsGroup> for LoweringDatabaseForTesting {
-    fn upcast(&self) -> &(dyn DefsGroup + 'static) {
-        self
-    }
-}
-impl Upcast<dyn SemanticGroup> for LoweringDatabaseForTesting {
-    fn upcast(&self) -> &(dyn SemanticGroup + 'static) {
-        self
-    }
-}
-impl Upcast<dyn LoweringGroup> for LoweringDatabaseForTesting {
-    fn upcast(&self) -> &(dyn LoweringGroup + 'static) {
-        self
-    }
-}
-impl HasMacroPlugins for LoweringDatabaseForTesting {
-    fn macro_plugins(&self) -> Vec<Arc<dyn MacroPlugin>> {
-        self.get_macro_plugins()
+
+/// Helper for formatting a lowered representation for tests.
+pub fn formatted_lowered(db: &dyn Database, lowered: Option<&Lowered<'_>>) -> String {
+    match lowered {
+        Some(lowered) => {
+            let lowered_formatter = LoweredFormatter::new(db, &lowered.variables);
+            format!("{:?}", lowered.debug(&lowered_formatter))
+        }
+        None => "<Failed lowering function - run with RUST_LOG=warn (or less) to see diagnostics>"
+            .to_string(),
     }
 }

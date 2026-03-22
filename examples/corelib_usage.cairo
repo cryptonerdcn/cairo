@@ -1,15 +1,10 @@
-impl MyCopy of Copy<Option<(felt252, felt252)>>;
-
 fn foo(x: Option<(felt252, felt252)>) -> Option<felt252> {
-    let y = x;
+    let _y = x;
     match x {
-        Option::Some(x) => {
-            let (x, y) = x;
-            Option::Some(x)
+        Some(x) => {
+            let (x, _y) = x;
+            Some(x)
         },
-        // TODO(spapini): Replace with _.
-        Option::None(o) => {
-            return Option::None(());
-        },
+        None => { return None; },
     }
 }

@@ -1,0 +1,6 @@
+[default.extend-words]
+# Don't correct the shorthand for ByteArray.
+ba = "ba"
+bimap = "bimap"
+compilability = "compilability"
+consts = "consts"

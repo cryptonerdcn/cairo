@@ -1,0 +1,257 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use cairo_lang_compiler::db::RootDatabase;
+use cairo_lang_compiler::project::setup_project;
+use cairo_lang_compiler::{CompilerConfig, ensure_diagnostics};
+use cairo_lang_defs::ids::TopLevelLanguageElementId;
+use cairo_lang_diagnostics::ToOption;
+use cairo_lang_filesystem::ids::{CrateId, CrateInput};
+use cairo_lang_lowering::ids::ConcreteFunctionWithBodyId;
+use cairo_lang_lowering::optimizations::config::Optimizations;
+use cairo_lang_lowering::utils::InliningStrategy;
+use cairo_lang_sierra::debug_info::Annotations;
+use cairo_lang_sierra_generator::canonical_id_replacer::CanonicalReplacer;
+use cairo_lang_sierra_generator::db::SierraGenGroup;
+use cairo_lang_sierra_generator::program_generator::SierraProgramWithDebug;
+use cairo_lang_sierra_generator::replace_ids::{SierraIdReplacer, replace_sierra_ids_in_program};
+use cairo_lang_starknet_classes::allowed_libfuncs::ListSelector;
+use cairo_lang_starknet_classes::contract_class::{
+    ContractClass, ContractEntryPoint, ContractEntryPoints,
+};
+use cairo_lang_utils::CloneableDatabase;
+use itertools::{Itertools, chain};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use salsa::Database;
+
+use crate::abi::AbiBuilder;
+use crate::aliased::Aliased;
+use crate::contract::{
+    ContractDeclaration, find_contracts, get_contract_abi_functions,
+    get_selector_and_sierra_function,
+};
+use crate::plugin::consts::{CONSTRUCTOR_MODULE, EXTERNAL_MODULE, L1_HANDLER_MODULE};
+use crate::starknet_plugin_suite;
+
+#[cfg(test)]
+#[path = "compile_test.rs"]
+mod test;
+
+/// Compile the contract given by the path.
+/// Errors if there is ambiguity.
+pub fn compile_path(
+    path: &Path,
+    contract_path: Option<&str>,
+    mut compiler_config: CompilerConfig<'_>,
+    inlining_strategy: InliningStrategy,
+) -> Result<ContractClass> {
+    let mut db = RootDatabase::builder()
+        .with_optimizations(Optimizations::enabled_with_default_movable_functions(
+            inlining_strategy,
+        ))
+        .detect_corelib()
+        .with_default_plugin_suite(starknet_plugin_suite())
+        .build()?;
+
+    let main_crate_inputs = setup_project(&mut db, path)?;
+    compiler_config.diagnostics_reporter =
+        compiler_config.diagnostics_reporter.with_crates(&main_crate_inputs);
+    let main_crate_ids = CrateInput::into_crate_ids(&db, main_crate_inputs);
+    compile_contract_in_prepared_db(&db, contract_path, main_crate_ids, compiler_config)
+}
+
+/// Runs Starknet contract compiler on the specified contract.
+/// If no contract was specified, verify that there is only one.
+/// Otherwise, returns an error.
+pub fn compile_contract_in_prepared_db<'db>(
+    db: &'db dyn CloneableDatabase,
+    contract_path: Option<&str>,
+    main_crate_ids: Vec<CrateId<'db>>,
+    mut compiler_config: CompilerConfig<'_>,
+) -> Result<ContractClass> {
+    let contracts = find_contracts(db, &main_crate_ids);
+    if contracts.is_empty() {
+        // Report diagnostics as they might reveal the reason why no contract was found.
+        compiler_config.diagnostics_reporter.ensure(db)?;
+        anyhow::bail!("No contracts found.");
+    }
+    let name = |contract: &ContractDeclaration<'db>| contract.submodule_id.full_path(db);
+    let contract = if let Some(contract_path) = contract_path {
+        if let Some(contract) = contracts.iter().find(|contract| name(contract) == contract_path) {
+            contract
+        } else {
+            // Report diagnostics as they might reveal the reason why the contract was not found.
+            compiler_config.diagnostics_reporter.ensure(db)?;
+            anyhow::bail!(
+                "No contract matching `--contract-path={contract_path}`, available contracts \
+                 are:\n  {}",
+                contracts.iter().map(name).join("\n  ")
+            );
+        }
+    } else if let [contract] = contracts.as_slice() {
+        contract
+    } else {
+        anyhow::bail!(
+            "More than one contract found in the main crate:\n  {}\nUse --contract-path to \
+             specify which to compile.",
+            contracts.iter().map(name).join("\n  ")
+        );
+    };
+
+    Ok(compile_prepared_db(db, &[contract], compiler_config)?.into_iter().exactly_one()?)
+}
+
+/// Runs Starknet contract compiler.
+///
+/// # Arguments
+/// * `db` - Preloaded compilation database.
+/// * `contracts` - [`ContractDeclaration`]s to compile. Use [`find_contracts`] to find contracts in
+///   `db`.
+/// * `compiler_config` - The compiler configuration.
+/// # Returns
+/// * `Ok(Vec<ContractClass>)` - List of all compiled contract classes found in main crates.
+/// * `Err(anyhow::Error)` - Compilation failed.
+pub fn compile_prepared_db<'db>(
+    db: &'db dyn CloneableDatabase,
+    contracts: &[&ContractDeclaration<'db>],
+    mut compiler_config: CompilerConfig<'_>,
+) -> Result<Vec<ContractClass>> {
+    ensure_diagnostics(db, &mut compiler_config.diagnostics_reporter)?;
+    contracts
+        .par_iter()
+        .map_with(db.dyn_clone(), |db, contract| {
+            compile_contract_with_prepared_and_checked_db(db.as_ref(), contract, &compiler_config)
+        })
+        .collect()
+}
+
+/// Compile the declared Starknet contract.
+///
+/// The `contract` value **must** come from `db`, for example as a result of calling
+/// [`find_contracts`]. Does not check diagnostics, it is expected that they are checked
+/// by the caller of this function.
+fn compile_contract_with_prepared_and_checked_db<'db>(
+    db: &'db dyn CloneableDatabase,
+    contract: &ContractDeclaration<'db>,
+    compiler_config: &CompilerConfig<'_>,
+) -> Result<ContractClass> {
+    let SemanticEntryPoints { external, l1_handler, constructor } =
+        extract_semantic_entrypoints(db, contract)?;
+    let SierraProgramWithDebug { program: mut sierra_program, debug_info } = db
+        .get_sierra_program_for_functions(
+            chain!(&external, &l1_handler, &constructor).map(|f| f.value).collect(),
+        )
+        .to_option()
+        .context("Compilation failed without any diagnostics.")?
+        .clone();
+
+    if compiler_config.replace_ids {
+        sierra_program = replace_sierra_ids_in_program(db, &sierra_program);
+    }
+    let replacer = CanonicalReplacer::from_program(&sierra_program);
+    let sierra_program = replacer.apply(&sierra_program);
+
+    let entry_points_by_type = ContractEntryPoints {
+        external: get_entry_points(db, &external, &replacer)?,
+        l1_handler: get_entry_points(db, &l1_handler, &replacer)?,
+        // Later generation of ABI verifies that there is up to one constructor.
+        constructor: get_entry_points(db, &constructor, &replacer)?,
+    };
+
+    let mut annotations = Annotations::default();
+
+    if compiler_config.add_statements_functions {
+        let statements_functions = debug_info.statements_locations.extract_statements_functions(db);
+        annotations.extend(Annotations::from(statements_functions))
+    };
+
+    if compiler_config.add_statements_code_locations {
+        let statements_functions =
+            debug_info.statements_locations.extract_statements_source_code_locations(db);
+        annotations.extend(Annotations::from(statements_functions))
+    };
+
+    if compiler_config.add_functions_debug_info {
+        annotations.extend(Annotations::from(
+            debug_info.functions_info.extract_serializable_debug_info(db),
+        ))
+    }
+
+    let abi_builder: Option<AbiBuilder<'db>> =
+        AbiBuilder::from_submodule(db, contract.submodule_id, Default::default()).ok();
+    let finalized_abi =
+        abi_builder.with_context(|| "Unexpected error while generating ABI.")?.finalize();
+    let abi = match finalized_abi {
+        Ok(abi) => abi,
+        Err(e) => anyhow::bail!("Could not create ABI from contract submodule: {}", e),
+    };
+    let contract_class =
+        ContractClass::new(&sierra_program, entry_points_by_type, Some(abi), annotations)?;
+    contract_class.sanity_check();
+    Ok(contract_class)
+}
+
+pub struct SemanticEntryPoints<'db> {
+    pub external: Vec<Aliased<ConcreteFunctionWithBodyId<'db>>>,
+    pub l1_handler: Vec<Aliased<ConcreteFunctionWithBodyId<'db>>>,
+    pub constructor: Vec<Aliased<ConcreteFunctionWithBodyId<'db>>>,
+}
+
+/// Extracts functions from the contract.
+pub fn extract_semantic_entrypoints<'db>(
+    db: &'db dyn Database,
+    contract: &ContractDeclaration<'db>,
+) -> core::result::Result<SemanticEntryPoints<'db>, anyhow::Error> {
+    let external: Vec<_> = get_contract_abi_functions(db, contract, EXTERNAL_MODULE)?
+        .into_iter()
+        .map(|f| f.map(|f| ConcreteFunctionWithBodyId::from_semantic(db, f)))
+        .collect();
+    let l1_handler: Vec<_> = get_contract_abi_functions(db, contract, L1_HANDLER_MODULE)?
+        .into_iter()
+        .map(|f| f.map(|f| ConcreteFunctionWithBodyId::from_semantic(db, f)))
+        .collect();
+    let constructor: Vec<_> = get_contract_abi_functions(db, contract, CONSTRUCTOR_MODULE)?
+        .into_iter()
+        .map(|f| f.map(|f| ConcreteFunctionWithBodyId::from_semantic(db, f)))
+        .collect();
+    if constructor.len() > 1 {
+        anyhow::bail!("Expected at most one constructor.");
+    }
+    Ok(SemanticEntryPoints { external, l1_handler, constructor })
+}
+
+/// Returns the entry points given their IDs sorted by selectors.
+fn get_entry_points<'db>(
+    db: &'db dyn Database,
+    entry_point_functions: &[Aliased<ConcreteFunctionWithBodyId<'db>>],
+    replacer: &CanonicalReplacer,
+) -> Result<Vec<ContractEntryPoint>> {
+    let mut entry_points = vec![];
+    for function_with_body_id in entry_point_functions {
+        let (selector, sierra_id) =
+            get_selector_and_sierra_function(db, function_with_body_id, replacer);
+
+        entry_points.push(ContractEntryPoint {
+            selector: selector.to_biguint(),
+            function_idx: sierra_id.id as usize,
+        });
+    }
+    entry_points.sort_by(|a, b| a.selector.cmp(&b.selector));
+    Ok(entry_points)
+}
+
+/// Compile a Starknet crate (or specific contract in the crate).
+pub fn starknet_compile(
+    crate_path: PathBuf,
+    contract_path: Option<String>,
+    config: Option<CompilerConfig<'_>>,
+    inlining_strategy: InliningStrategy,
+    allowed_libfuncs_list: Option<ListSelector>,
+) -> Result<String> {
+    let config = config.unwrap_or_default();
+    let contract = compile_path(&crate_path, contract_path.as_deref(), config, inlining_strategy)?;
+    contract
+        .extract_sierra_program(false)?
+        .validate_version_compatible(allowed_libfuncs_list.unwrap_or_default())?;
+    serde_json::to_string_pretty(&contract).with_context(|| "Serialization failed.")
+}

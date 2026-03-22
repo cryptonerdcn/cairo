@@ -1,9 +1,9 @@
 //! > Test import alias.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 use u32 as myU32;
 fn foo(a: myU32) -> u32 {
     a
@@ -12,6 +12,260 @@ fn foo(a: myU32) -> u32 {
 //! > function_name
 foo
 
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > unresolved `use` does not interfere with inference.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    let x = @1.into();
+    bar(x, @1);
+}
+
+//! > function_name
+foo
+
 //! > module_code
+mod internal {
+    fn bar<T, +PartialEq<T>>(a: @T, b: @T) {}
+}
+use NonExisting;
+use internal::bar;
 
 //! > expected_diagnostics
+error[E0006]: Identifier not found.
+ --> lib.cairo:4:5
+use NonExisting;
+    ^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Single segment usage of prelude.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+use Array;
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Single segment usage of dependency crate.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+use core;
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Self referential use.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+mod a {
+    use super::a::b;
+}
+
+//! > expected_diagnostics
+error[E2025]: Cycle detected while resolving 'use' items.
+ --> lib.cairo:2:19
+    use super::a::b;
+                  ^
+
+//! > ==========================================================================
+
+//! > `self` use as leaf.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+mod a {
+    mod b {
+        mod c {}
+    }
+}
+use a::b::{self, c};
+use b::c as again;
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > `self` use not in a multi leaf.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+mod a {
+    mod b {
+        mod c {}
+    }
+}
+#[cairofmt::skip]
+use a::b::self;
+
+//! > expected_diagnostics
+error[E2088]: `self` in `use` items is not allowed not in multi.
+ --> lib.cairo:7:11
+use a::b::self;
+          ^^^^
+
+//! > ==========================================================================
+
+//! > `self` use as full path.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+use {self, u8};
+
+//! > expected_diagnostics
+error[E2089]: `self` in `use` items is not allowed for empty path.
+ --> lib.cairo:1:6
+use {self, u8};
+     ^^^^
+
+//! > ==========================================================================
+
+//! > Use star on a module that was imported with use star.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > function_code
+fn foo() {
+    C::test();
+}
+
+//! > function_name
+foo
+
+//! > module_code
+mod A {
+    pub mod B {
+        pub mod C {
+            pub fn test() {}
+        }
+    }
+}
+use A::*;
+use B::*;
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Use star on a non existing module.
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    C::test();
+}
+
+//! > function_name
+foo
+
+//! > module_code
+use B::*;
+
+//! > expected_diagnostics
+error[E0006]: Identifier not found.
+ --> lib.cairo:3:5
+    C::test();
+    ^
+
+error[E0006]: Identifier not found.
+ --> lib.cairo:1:5
+use B::*;
+    ^
+
+//! > ==========================================================================
+
+//! > Use cycle with global use.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > function_code
+fn foo() {}
+
+//! > function_name
+foo
+
+//! > module_code
+mod a {
+    pub use super::b::*;
+}
+mod b {
+    pub use super::a::a;
+}
+
+//! > expected_diagnostics
+error[E2025]: Cycle detected while resolving 'use' items.
+ --> lib.cairo:5:23
+    pub use super::a::a;
+                      ^

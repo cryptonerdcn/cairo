@@ -1,0 +1,97 @@
+//! > While loop.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    while true {
+        1;
+        break 5;
+        break;
+    }
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2147]: Can only break with a value inside a `loop`.
+ --> lib.cairo:4:9
+        break 5;
+        ^^^^^^^^
+
+//! > ==========================================================================
+
+//! > While let loop.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    while let Some(x) = Some(5) && 4 == 7 {
+        1;
+        break x;
+        break;
+    }
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E2000]: Unsupported feature.
+ --> lib.cairo:2:11
+    while let Some(x) = Some(5) && 4 == 7 {
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > While let Some no args.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() {
+    while let Some = Some(5) {
+        1;
+        break;
+    }
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+warning[E2192]: Pattern missing subpattern for the payload of variant. Consider using `Some(_)`
+ --> lib.cairo:2:15
+    while let Some = Some(5) {
+              ^^^^
+
+//! > ==========================================================================
+
+//! > While let Some no args with unit.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {
+    let a = A::B(());
+    while let A::B = a {
+        1;
+        break;
+    }
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum A {
+    B: (),
+}
+
+//! > expected_diagnostics

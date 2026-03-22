@@ -9,5 +9,11 @@ description = "Test runner for the Cairo programming language"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+mimalloc = { workspace = true, optional = true }
 
-cairo-lang-test-runner = { path = "../../cairo-lang-test-runner", version = "2.0.0-rc2" }
+cairo-lang-compiler = { path = "../../cairo-lang-compiler", version = "=2.16.0" }
+cairo-lang-runner = { path = "../../cairo-lang-runner", version = "=2.16.0" }
+cairo-lang-test-runner = { path = "../../cairo-lang-test-runner", version = "=2.16.0" }
+
+[features]
+mimalloc = ["dep:mimalloc"]

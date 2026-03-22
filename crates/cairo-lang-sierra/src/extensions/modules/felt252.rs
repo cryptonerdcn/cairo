@@ -67,10 +67,10 @@ impl Felt252BinaryOperationWithVarLibfunc {
     fn new(operator: Felt252BinaryOperator) -> Self {
         Self { operator }
     }
-    const ADD: &str = "felt252_add";
-    const SUB: &str = "felt252_sub";
-    const MUL: &str = "felt252_mul";
-    const DIV: &str = "felt252_div";
+    const ADD: &'static str = "felt252_add";
+    const SUB: &'static str = "felt252_sub";
+    const MUL: &'static str = "felt252_mul";
+    const DIV: &'static str = "felt252_div";
 }
 impl GenericLibfunc for Felt252BinaryOperationWithVarLibfunc {
     type Concrete = Felt252BinaryOpConcreteLibfunc;
@@ -128,7 +128,7 @@ impl GenericLibfunc for Felt252BinaryOperationWithVarLibfunc {
             [] => Ok({
                 Felt252BinaryOpConcreteLibfunc {
                     operator: self.operator,
-                    signature: self.specialize_signature(context.upcast(), args)?,
+                    signature: self.specialize_signature(context, args)?,
                 }
             }),
             _ => Err(SpecializationError::WrongNumberOfGenericArgs),
@@ -144,10 +144,10 @@ impl Felt252BinaryOperationWithConstLibfunc {
     fn new(operator: Felt252BinaryOperator) -> Self {
         Self { operator }
     }
-    const ADD: &str = "felt252_add_const";
-    const SUB: &str = "felt252_sub_const";
-    const MUL: &str = "felt252_mul_const";
-    const DIV: &str = "felt252_div_const";
+    const ADD: &'static str = "felt252_add_const";
+    const SUB: &'static str = "felt252_sub_const";
+    const MUL: &'static str = "felt252_mul_const";
+    const DIV: &'static str = "felt252_div_const";
 }
 impl GenericLibfunc for Felt252BinaryOperationWithConstLibfunc {
     type Concrete = Felt252OperationWithConstConcreteLibfunc;
@@ -179,16 +179,18 @@ impl GenericLibfunc for Felt252BinaryOperationWithConstLibfunc {
         let ty = context.get_concrete_type(Felt252Type::id(), &[])?;
         match args {
             [GenericArg::Value(c)] => {
-                if matches!(self.operator, Felt252BinaryOperator::Div) && c.is_zero() {
-                    return Err(SpecializationError::UnsupportedGenericArg);
-                }
+                let output_ref_info = if matches!(self.operator, Felt252BinaryOperator::Div) {
+                    if c.is_zero() {
+                        return Err(SpecializationError::UnsupportedGenericArg);
+                    }
+                    OutputVarReferenceInfo::NewTempVar { idx: 0 }
+                } else {
+                    OutputVarReferenceInfo::Deferred(DeferredOutputKind::Generic)
+                };
 
                 Ok(LibfuncSignature::new_non_branch(
                     vec![ty.clone()],
-                    vec![OutputVarInfo {
-                        ty,
-                        ref_info: OutputVarReferenceInfo::Deferred(DeferredOutputKind::Generic),
-                    }],
+                    vec![OutputVarInfo { ty, ref_info: output_ref_info }],
                     SierraApChange::Known { new_vars_only: true },
                 ))
             }
@@ -209,7 +211,7 @@ impl GenericLibfunc for Felt252BinaryOperationWithConstLibfunc {
                     Ok(Felt252OperationWithConstConcreteLibfunc {
                         operator: self.operator,
                         c: c.clone(),
-                        signature: self.specialize_signature(context.upcast(), args)?,
+                        signature: self.specialize_signature(context, args)?,
                     })
                 }
             }
@@ -271,11 +273,7 @@ impl NamedLibfunc for Felt252ConstLibfunc {
         match args {
             [GenericArg::Value(c)] => Ok(Felt252ConstConcreteLibfunc {
                 c: c.clone(),
-                signature: <Self as NamedLibfunc>::specialize_signature(
-                    self,
-                    context.upcast(),
-                    args,
-                )?,
+                signature: <Self as NamedLibfunc>::specialize_signature(self, context, args)?,
             }),
             _ => Err(SpecializationError::UnsupportedGenericArg),
         }

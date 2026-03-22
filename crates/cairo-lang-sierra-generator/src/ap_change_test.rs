@@ -1,7 +1,8 @@
-use cairo_lang_defs::db::DefsGroup;
+use cairo_lang_defs::ids::NamedLanguageElementId;
 use cairo_lang_lowering::db::LoweringGroup;
 use cairo_lang_lowering::ids::ConcreteFunctionWithBodyId;
 use cairo_lang_semantic::test_utils::setup_test_module;
+use cairo_lang_test_utils::parse_test_file::TestRunnerResult;
 use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
 use itertools::Itertools;
 
@@ -15,8 +16,11 @@ cairo_lang_test_utils::test_file_test!(
     contains_cycles_test
 );
 
-fn contains_cycles_test(inputs: &OrderedHashMap<String, String>) -> OrderedHashMap<String, String> {
-    let db = &mut SierraGenDatabaseForTesting::default();
+fn contains_cycles_test(
+    inputs: &OrderedHashMap<String, String>,
+    _args: &OrderedHashMap<String, String>,
+) -> TestRunnerResult {
+    let db = &SierraGenDatabaseForTesting::default();
     // Parse code and create semantic model.
     let test_module = setup_test_module(db, inputs["module_code"].as_str()).unwrap();
 
@@ -24,21 +28,23 @@ fn contains_cycles_test(inputs: &OrderedHashMap<String, String>) -> OrderedHashM
         .unwrap()
         .expect_with_db(db, "Unexpected diagnostics.");
 
-    let result = db
-        .module_free_functions(test_module.module_id)
+    let result = test_module
+        .module_id
+        .module_data(db)
         .unwrap()
+        .free_functions(db)
         .iter()
         .map(|(free_function_id, _)| {
             let function_id =
                 ConcreteFunctionWithBodyId::from_no_generics_free(db, *free_function_id).unwrap();
             format!(
                 "{}: ap_change={:?}, has_cycles={:?}",
-                free_function_id.name(db),
+                free_function_id.name(db).long(db),
                 db.get_ap_change(function_id),
-                db.contains_cycle(function_id),
+                db.final_contains_call_cycle(function_id),
             )
         })
         .join("\n");
 
-    OrderedHashMap::from([("result".into(), result)])
+    TestRunnerResult::success(OrderedHashMap::from([("result".into(), result)]))
 }

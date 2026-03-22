@@ -1,47 +1,50 @@
 use std::sync::Arc;
 
-use cairo_lang_defs::db::DefsGroup;
-use cairo_lang_defs::ids::ModuleId;
+use cairo_lang_defs::db::{DefsGroup, defs_group_input};
+use cairo_lang_defs::ids::{GenericTypeId, MacroPluginLongId, ModuleId, TopLevelLanguageElementId};
+use cairo_lang_defs::patcher::{PatchBuilder, RewriteNode};
 use cairo_lang_defs::plugin::{
-    DynGeneratedFileAuxData, GeneratedFileAuxData, MacroPlugin, PluginGeneratedFile, PluginResult,
+    MacroPlugin, MacroPluginMetadata, PluginDiagnostic, PluginGeneratedFile, PluginResult,
 };
-use cairo_lang_diagnostics::DiagnosticEntry;
-use cairo_lang_syntax::node::ast;
-use cairo_lang_syntax::node::db::SyntaxGroup;
+use cairo_lang_filesystem::ids::SmolStrId;
 use cairo_lang_syntax::node::helpers::QueryAttrs;
+use cairo_lang_syntax::node::{TypedStablePtr, ast};
 use indoc::indoc;
 use pretty_assertions::assert_eq;
-use test_log::test;
+use salsa::{Database, Setter};
 
-use crate::db::SemanticGroup;
-use crate::patcher::{PatchBuilder, Patches, RewriteNode};
-use crate::plugin::{
-    AsDynGeneratedFileAuxData, AsDynMacroPlugin, DynPluginAuxData, PluginAuxData,
-    PluginMappedDiagnostic, SemanticPlugin,
-};
+use crate::db::{SemanticGroup, semantic_group_input};
+use crate::ids::AnalyzerPluginLongId;
+use crate::items::us::SemanticUseEx;
+use crate::plugin::AnalyzerPlugin;
+use crate::resolve::ResolvedGenericItem;
 use crate::test_utils::{
-    get_crate_semantic_diagnostics, setup_test_crate, test_expr_diagnostics,
-    SemanticDatabaseForTesting,
+    SemanticDatabaseForTesting, get_crate_semantic_diagnostics, setup_test_crate,
+    test_expr_diagnostics,
 };
-use crate::SemanticDiagnostic;
 
 cairo_lang_test_utils::test_file_test!(
     diagnostics,
     "src/diagnostic_test_data",
     {
+        allow: "allow",
+        allow_attr: "allow_attr",
+        deref: "deref",
         tests: "tests",
         not_found: "not_found",
         missing: "missing",
+        neg_impl: "neg_impl",
         plus_eq: "plus_eq",
         inline: "inline",
     },
-    test_expr_diagnostics
+    test_expr_diagnostics,
+    ["expect_diagnostics"]
 );
 
-#[test]
+#[cairo_lang_test_utils::test]
 fn test_missing_module_file() {
-    let mut db_val = SemanticDatabaseForTesting::default();
-    let db = &mut db_val;
+    let db_val = SemanticDatabaseForTesting::default();
+    let db = &db_val;
     let crate_id = setup_test_crate(
         db,
         "
@@ -56,10 +59,10 @@ fn test_missing_module_file() {
     assert_eq!(
         db.module_semantic_diagnostics(ModuleId::Submodule(submodule_id)).unwrap().format(db),
         indoc! {"
-            error: Module file not found. Expected path: src/a/abc.cairo
+            error[E0005]: Module file not found. Expected path: abc.cairo
              --> lib.cairo:3:9
                     mod abc;
-                    ^******^
+                    ^^^^^^^^
 
             "
         },
@@ -73,10 +76,15 @@ fn test_missing_module_file() {
 struct AddInlineModuleDummyPlugin;
 
 impl MacroPlugin for AddInlineModuleDummyPlugin {
-    fn generate_code(&self, db: &dyn SyntaxGroup, item_ast: ast::Item) -> PluginResult {
+    fn generate_code<'db>(
+        &self,
+        db: &'db dyn Database,
+        item_ast: ast::ModuleItem<'db>,
+        _metadata: &MacroPluginMetadata<'_>,
+    ) -> PluginResult<'db> {
         match item_ast {
-            ast::Item::FreeFunction(func) if func.has_attr(db, "test_change_return_type") => {
-                let mut builder = PatchBuilder::new(db);
+            ast::ModuleItem::FreeFunction(func) if func.has_attr(db, "test_change_return_type") => {
+                let mut builder = PatchBuilder::new(db, &func);
                 let mut new_func = RewriteNode::from_ast(&func);
                 if matches!(
                     func.declaration(db).signature(db).ret_ty(db),
@@ -107,16 +115,18 @@ impl MacroPlugin for AddInlineModuleDummyPlugin {
                             $func$
                         }}
                     "},
-                    [("func".to_string(), new_func)].into(),
+                    &[("func".to_string(), new_func)].into(),
                 ));
 
+                let (content, code_mappings) = builder.build();
                 PluginResult {
                     code: Some(PluginGeneratedFile {
                         name: "virt2".into(),
-                        content: builder.code,
-                        aux_data: DynGeneratedFileAuxData::new(DynPluginAuxData::new(
-                            PatchMapper { patches: builder.patches },
-                        )),
+                        content,
+                        code_mappings,
+                        aux_data: None,
+                        diagnostics_note: Default::default(),
+                        is_unhygienic: false,
                     }),
                     diagnostics: vec![],
                     remove_original_item: false,
@@ -125,53 +135,19 @@ impl MacroPlugin for AddInlineModuleDummyPlugin {
             _ => PluginResult::default(),
         }
     }
-}
-impl AsDynMacroPlugin for AddInlineModuleDummyPlugin {
-    fn as_dyn_macro_plugin<'a>(self: Arc<Self>) -> Arc<dyn MacroPlugin + 'a>
-    where
-        Self: 'a,
-    {
-        self
-    }
-}
-impl SemanticPlugin for AddInlineModuleDummyPlugin {}
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct PatchMapper {
-    patches: Patches,
-}
-impl GeneratedFileAuxData for PatchMapper {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn eq(&self, other: &dyn GeneratedFileAuxData) -> bool {
-        if let Some(other) = other.as_any().downcast_ref::<Self>() { self == other } else { false }
-    }
-}
-impl AsDynGeneratedFileAuxData for PatchMapper {
-    fn as_dyn_macro_token(&self) -> &(dyn GeneratedFileAuxData + 'static) {
-        self
-    }
-}
-impl PluginAuxData for PatchMapper {
-    fn map_diag(
-        &self,
-        db: &(dyn SemanticGroup + 'static),
-        diag: &dyn std::any::Any,
-    ) -> Option<PluginMappedDiagnostic> {
-        let Some(diag) = diag.downcast_ref::<SemanticDiagnostic>() else {return None;};
-        let span = self
-            .patches
-            .translate(db.upcast(), diag.stable_location.diagnostic_location(db.upcast()).span)?;
-        Some(PluginMappedDiagnostic { span, message: format!("Mapped error. {}", diag.format(db)) })
+    fn declared_attributes<'db>(&self, db: &'db dyn Database) -> Vec<SmolStrId<'db>> {
+        vec![SmolStrId::from(db, "test_change_return_type")]
     }
 }
 
-#[test]
+#[cairo_lang_test_utils::test]
 fn test_inline_module_diagnostics() {
-    let mut db_val = SemanticDatabaseForTesting::default();
+    let mut db_val = SemanticDatabaseForTesting::new_empty();
     let db = &mut db_val;
-    db.set_semantic_plugins(vec![Arc::new(AddInlineModuleDummyPlugin)]);
+    defs_group_input(db)
+        .set_default_macro_plugins(db)
+        .to(Some(vec![MacroPluginLongId(Arc::new(AddInlineModuleDummyPlugin))]));
     let crate_id = setup_test_crate(
         db,
         indoc! {"
@@ -188,24 +164,24 @@ fn test_inline_module_diagnostics() {
     assert_eq!(
         get_crate_semantic_diagnostics(db, crate_id).format(db),
         indoc! {r#"
-            error: Unexpected return type. Expected: "core::integer::u128", found: "core::felt252".
+            error[E2042]: Unexpected return type. Expected: "core::integer::u128", found: "core::felt252".
              --> lib.cairo:4:16
                     return 5_felt252;
-                           ^*******^
+                           ^^^^^^^^^
 
-            error: Plugin diagnostic: Mapped error. Unexpected return type. Expected: "test::a::inner_mod::NewType", found: "core::felt252".
+            error[E2042]: Unexpected return type. Expected: "test::a::inner_mod::NewType", found: "core::felt252".
              --> lib.cairo:4:16
                     return 5_felt252;
-                           ^*******^
+                           ^^^^^^^^^
 
             "#},
     );
 }
 
-#[test]
+#[cairo_lang_test_utils::test]
 fn test_inline_inline_module_diagnostics() {
-    let mut db_val = SemanticDatabaseForTesting::default();
-    let db = &mut db_val;
+    let db_val = SemanticDatabaseForTesting::default();
+    let db = &db_val;
     let crate_id = setup_test_crate(
         db,
         indoc! {"
@@ -233,15 +209,107 @@ fn test_inline_inline_module_diagnostics() {
 
     assert_eq!(
         get_crate_semantic_diagnostics(db, crate_id).format(db),
-        indoc! {r#"error: Unexpected return type. Expected: "core::integer::u128", found: "core::felt252".
+        indoc! {r#"error[E2042]: Unexpected return type. Expected: "core::integer::u128", found: "core::felt252".
              --> lib.cairo:3:16
                     return 1_felt252;
-                           ^*******^
+                           ^^^^^^^^^
 
-            error: Unexpected return type. Expected: "core::integer::u128", found: "core::felt252".
+            error[E2042]: Unexpected return type. Expected: "core::integer::u128", found: "core::felt252".
              --> lib.cairo:9:20
                         return 2_felt252;
-                               ^*******^
+                               ^^^^^^^^^
+
+    "#},
+    );
+}
+
+#[derive(Debug)]
+struct NoU128RenameAnalyzerPlugin;
+impl AnalyzerPlugin for NoU128RenameAnalyzerPlugin {
+    fn diagnostics<'db>(
+        &self,
+        db: &'db dyn Database,
+        module_id: ModuleId<'db>,
+    ) -> Vec<PluginDiagnostic<'db>> {
+        let mut diagnostics = vec![];
+        let Ok(uses) = db.module_uses_ids(module_id) else {
+            return diagnostics;
+        };
+        for use_id in uses.iter() {
+            let Ok(ResolvedGenericItem::GenericType(GenericTypeId::Extern(ty))) =
+                db.use_resolved_item(*use_id)
+            else {
+                continue;
+            };
+            if ty.full_path(db) == "core::integer::u128" {
+                diagnostics.push(PluginDiagnostic::error(
+                    use_id.stable_ptr(db).untyped(),
+                    "Use items for u128 disallowed.".to_string(),
+                ));
+            }
+        }
+        diagnostics
+    }
+
+    fn declared_allows(&self) -> Vec<String> {
+        vec!["u128_rename".to_string()]
+    }
+}
+
+#[cairo_lang_test_utils::test]
+fn test_analyzer_diagnostics() {
+    let mut db_val = SemanticDatabaseForTesting::new_empty();
+    let db = &mut db_val;
+    let db_ref: &mut dyn Database = db;
+    semantic_group_input(db_ref)
+        .set_default_analyzer_plugins(db_ref)
+        .to(Some(vec![AnalyzerPluginLongId(Arc::new(NoU128RenameAnalyzerPlugin))]));
+    let crate_id = setup_test_crate(
+        db,
+        indoc! {"
+            mod inner {
+                use core::integer::u128 as long_u128_rename;
+                use u128 as short_u128_rename;
+                use core::integer::u64 as long_u64_rename;
+                use u64 as short_u64_rename;
+            }
+            use core::integer::u128 as long_u128_rename;
+            use u128 as short_u128_rename;
+            use inner::long_u128_rename as additional_u128_rename;
+            #[allow(u128_rename)]
+            use core::integer::u64 as long_u64_rename;
+            use u64 as short_u64_rename;
+            use inner::long_u64_rename as additional_u64_rename;
+       "},
+    );
+
+    assert_eq!(
+        get_crate_semantic_diagnostics(db, crate_id).format(db),
+        indoc! {r#"
+        error[E2200]: Plugin diagnostic: Use items for u128 disallowed.
+         --> lib.cairo:7:20
+        use core::integer::u128 as long_u128_rename;
+                           ^^^^^^^^^^^^^^^^^^^^^^^^
+
+        error[E2200]: Plugin diagnostic: Use items for u128 disallowed.
+         --> lib.cairo:8:5
+        use u128 as short_u128_rename;
+            ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+        error[E2200]: Plugin diagnostic: Use items for u128 disallowed.
+         --> lib.cairo:9:12
+        use inner::long_u128_rename as additional_u128_rename;
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+        error[E2200]: Plugin diagnostic: Use items for u128 disallowed.
+         --> lib.cairo:2:24
+            use core::integer::u128 as long_u128_rename;
+                               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+        error[E2200]: Plugin diagnostic: Use items for u128 disallowed.
+         --> lib.cairo:3:9
+            use u128 as short_u128_rename;
+                ^^^^^^^^^^^^^^^^^^^^^^^^^
 
     "#},
     );

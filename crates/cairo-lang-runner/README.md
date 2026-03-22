@@ -1,16 +1,16 @@
 # Compiling and running cairo files
 
 ```
-cargo run --bin cairo-run -- /path/to/file.cairo
+cargo run --bin cairo-run -- --single-file /path/to/file.cairo
 ```
 
 If we want to run code that is gas tested:
 
 ```
-cargo run --bin cairo-run -- /path/to/file.cairo --available-gas 200
+cargo run --bin cairo-run -- --single-file /path/to/file.cairo --available-gas 200
 ```
 
-We currently only run the `main` function with no arguments beside implicits.
+We currently only run the `main` function with no arguments besides implicits.
 
 # Example
 
@@ -28,6 +28,14 @@ fn fib(a: u128, b: u128, n: u128) -> u128 {
     }
 }
 ```
+
+# Command-Line Options
+
+- `--single-file` - Treat the path as a single file instead of a project directory.
+- `--available-gas <amount>` - Set the amount of gas available for execution.
+- `--print-full-memory` - Print the full memory state after execution.
+- `--allow-warnings` - Allow the compilation to succeed even with warnings.
+- `--run-profiler` - Run the profiler and display profiling information.
 
 # Additional Information
 

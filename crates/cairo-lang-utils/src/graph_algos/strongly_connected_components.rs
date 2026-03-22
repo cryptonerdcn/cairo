@@ -1,7 +1,5 @@
 //! Logic for computing the strongly connected component of a node in a graph.
 
-use core::hash::Hash;
-
 use super::graph_node::GraphNode;
 use crate::unordered_hash_map::UnorderedHashMap;
 
@@ -10,10 +8,7 @@ use crate::unordered_hash_map::UnorderedHashMap;
 mod strongly_connected_components_test;
 
 /// A trait for a type that can compute its strongly-connected-component.
-pub trait ComputeScc
-where
-    Self: GraphNode,
-{
+pub trait ComputeScc: GraphNode {
     fn compute_scc(&self) -> Vec<Self::NodeId>;
 }
 
@@ -38,7 +33,7 @@ struct SccAlgoContext<Node: GraphNode> {
     next_index: u32,
     /// The stack of the nodes in the DFS.
     stack: Vec<Node::NodeId>,
-    /// All visited nodes. If a graph node is not in the map, it wasn't yet visited.
+    /// All visited nodes. If a graph node is not in the map, it hasn't yet been visited.
     known_nodes: UnorderedHashMap<Node::NodeId, SccAlgoNode<Node>>,
     /// The ID of the node we want to find the SCC of.
     target_node_id: Node::NodeId,
@@ -66,47 +61,48 @@ pub fn compute_scc<Node: GraphNode>(root: &Node) -> Vec<Node::NodeId> {
 
 /// The recursive call to compute the SCC of a given node.
 fn compute_scc_recursive<Node: GraphNode>(ctx: &mut SccAlgoContext<Node>, current_node: &Node) {
-    let mut current_wrapper_node = SccAlgoNode {
-        node: current_node.clone(),
-        index: ctx.next_index,
-        lowlink: ctx.next_index,
-        on_stack: true,
-    };
+    let mut current_lowlink = ctx.next_index;
     let current_node_id = current_node.get_id();
-    ctx.known_nodes.insert(current_node_id.clone(), current_wrapper_node.clone());
+    ctx.known_nodes.insert(
+        current_node_id.clone(),
+        SccAlgoNode {
+            node: current_node.clone(),
+            index: ctx.next_index,
+            lowlink: current_lowlink,
+            on_stack: true,
+        },
+    );
     ctx.next_index += 1;
     ctx.stack.push(current_node_id.clone());
 
+    let mut is_scc_root = true;
     for neighbor in current_node.get_neighbors() {
         let neighbor_id = neighbor.get_id();
-        match ctx.known_nodes.get(&neighbor_id) {
+        let lowlink_candidate = match ctx.known_nodes.get(&neighbor_id) {
             None => {
                 // neighbor was not visited yet. Visit it and maybe apply its lowlink to root.
                 compute_scc_recursive(ctx, &neighbor);
                 // Now neighbor should be in known_nodes.
-                current_wrapper_node.lowlink = std::cmp::min(
-                    current_wrapper_node.lowlink,
-                    ctx.known_nodes[&neighbor_id].lowlink,
-                );
+                ctx.known_nodes[&neighbor_id].lowlink
             }
             Some(neighbor_node) => {
-                if ctx.known_nodes[&neighbor_id].on_stack {
-                    // This is a back edge, meaning neighbor is in current_node's SCC.
-                    current_wrapper_node.lowlink =
-                        std::cmp::min(current_wrapper_node.lowlink, neighbor_node.index);
-                } else {
-                    // If neighbor is known but not on stack, it's in a concluded dropped SCC.
-                    // Ignore it.
+                // If neighbor is known but not on stack, it's in a concluded dropped SCC.
+                // Ignore it.
+                if !ctx.known_nodes[&neighbor_id].on_stack {
                     continue;
                 }
+                // This is a back edge, meaning neighbor is in current_node's SCC.
+                neighbor_node.index
             }
         };
-
-        // Update current_node in ctx.known_nodes.
-        ctx.known_nodes.insert(current_node_id.clone(), current_wrapper_node.clone());
+        if lowlink_candidate < current_lowlink {
+            current_lowlink = lowlink_candidate;
+            ctx.known_nodes.get_mut(&current_node_id).unwrap().lowlink = current_lowlink;
+            is_scc_root = false;
+        }
     }
 
-    if current_wrapper_node.lowlink != current_wrapper_node.index {
+    if !is_scc_root {
         // `current_node` is not a root of an SCC. We only conclude SCCs when we reach their roots.
         return;
     }
@@ -118,10 +114,11 @@ fn compute_scc_recursive<Node: GraphNode>(ctx: &mut SccAlgoContext<Node>, curren
     while let Some(other_node_id) = ctx.stack.pop() {
         let other_node = ctx.known_nodes.get_mut(&other_node_id).unwrap();
         other_node.on_stack = false;
-        scc.push(other_node_id.clone());
+        let is_root = other_node_id == current_node_id;
+        scc.push(other_node_id);
 
-        // Stop once the popped node is the current node which is the root on the SCC.
-        if other_node_id == current_node_id {
+        // Stop once the popped node is the current node which is the root of the SCC.
+        if is_root {
             break;
         }
     }

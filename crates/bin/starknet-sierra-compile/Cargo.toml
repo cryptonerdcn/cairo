@@ -4,11 +4,18 @@ version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license-file.workspace = true
-description = "Compiler executable for the Sierra intemediate representation with StarkNet extensions"
+description = "Compiler executable for the Sierra intermediate representation with Starknet extensions"
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+mimalloc = { workspace = true, optional = true }
+serde = { workspace = true, default-features = true }
 serde_json.workspace = true
 
-cairo-lang-starknet = { path = "../../cairo-lang-starknet", version = "2.0.0-rc2" }
+cairo-lang-sierra = { path = "../../cairo-lang-sierra", version = "=2.16.0" }
+cairo-lang-starknet-classes = { path = "../../cairo-lang-starknet-classes", version = "=2.16.0" }
+cairo-lang-utils = { path = "../../cairo-lang-utils", version = "=2.16.0", features = ["serde"] }
+
+[features]
+mimalloc = ["dep:mimalloc"]

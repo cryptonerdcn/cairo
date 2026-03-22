@@ -27,7 +27,13 @@ let z = 5; z +=4; 5 + Struct{a: 5, b: Struct2{_gg: ()}}; let df =6;{let k = 1; l
 }
 
 fn bar < T > (x:T)->T{
-let x:T=1;}
+let x:T=1;     let x:[u32;3]=[1,2, 3]; let[a,b,c]=x;
+let [
+        a, b, c
+    ] = f("very long string that should not cause a break in the fixed size array pattern");
+       // Long fixed-size array
+   let arr = [composition_log_size - LOG_COMPOSITION_SPLIT_FACTOR; COMPOSITION_SPLIT_FACTOR * QM31_EXTENSION_DEGREE];
+}
 
 
 struct A{} struct B{}
@@ -45,4 +51,29 @@ fn fib(a: Box::<felt252>, b: Box::<felt252>, n: Box::<felt252>) -> Box::<felt252
             )
         },
     }
+// A trailing comment.
+}
+
+fn if_let_test() {
+    if let (x, y) = (x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x + x,y + y + y + y + y + y) {
+        if_let_block_content();
+    }
+}
+
+
+impl DropMyImplCoupon<T> of Drop<MyImpl::<T>::trait_fn::Coupon>;
+impl DropMyImplCoupon<T> of Drop<MyImpl::<T>::trait_fn>;
+impl DropMyImplCoupon<T> of Drop<MyImpl::<T>>;
+
+// Test that semicolons are preserved when next statement starts with a post operator.
+fn semicolon_preservation_test() {
+    // Semicolon should be preserved - next starts with [ (array literal vs indexing)
+    if true { return; };
+    [1, 2, 3];
+    // Semicolon should be preserved - next starts with - (negation vs subtraction)
+    if true { return; };
+    -5;
+    // Semicolon should be removed - next starts with identifier (not a post operator)
+    if true { return; };
+    foo();
 }

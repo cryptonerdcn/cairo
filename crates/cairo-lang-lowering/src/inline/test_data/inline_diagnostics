@@ -3,40 +3,36 @@
 //! > test_runner_name
 test_function_inlining
 
-//! > function
+//! > function_code
 #[inline(always)]
 fn foo(ref a: felt252, b: felt252) -> felt252 {
-  foo(ref a, b);
-  b
+    foo(ref a, b);
+    b
 }
 
 //! > function_name
 foo
 
-//! > module_code
-
 //! > semantic_diagnostics
 
 //! > lowering_diagnostics
-error: Cannot inline a function that might call itself.
- --> lib.cairo:1:1
-#[inline(always)]
-^***************^
+error[E3005]: Cannot inline a function that might call itself.
+ --> lib.cairo:1:1-5:1
+  #[inline(always)]
+ _^
+| ...
+| }
+|_^
 
 //! > before
-Parameters: v0: core::felt252, v1: core::felt252
-blk0 (root):
-Statements:
-  (v3: core::felt252, v2: core::felt252) <- test::foo(v0, v1)
-End:
-  Return(v3, v1)
+<Failed lowering function - run with RUST_LOG=warn (or less) to see diagnostics>
 
 //! > after
-Parameters: v0: core::felt252, v1: core::felt252
+<Failed lowering function - run with RUST_LOG=warn (or less) to see diagnostics>
 
 //! > ==========================================================================
 
-//! > Test inlining a function where the the last block does not return.
+//! > Test inlining a function where the last block does not return.
 
 //! > test_runner_name
 test_function_inlining
@@ -44,19 +40,19 @@ test_function_inlining
 //! > function_name
 foo
 
-//! > function
+//! > function_code
 fn foo(n: felt252) -> felt252 {
-  bar(n)
+    bar(n)
 }
 
 //! > module_code
 #[inline(always)]
 fn bar(n: felt252) -> felt252 {
-  if n == 0 {
-    return 1;
-  } else {
-    return 1;
-  }
+    if n == 0 {
+        return 1;
+    } else {
+        return 1;
+    }
 }
 
 //! > semantic_diagnostics
@@ -74,31 +70,35 @@ Parameters: v0: core::felt252
 blk0 (root):
 Statements:
 End:
-  Goto(blk2, {})
+  Goto(blk1, {})
 
 blk1:
 Statements:
 End:
-  Return(v1)
+  Match(match core::felt252_is_zero(v0) {
+    IsZeroResult::Zero => blk2,
+    IsZeroResult::NonZero(v2) => blk3,
+  })
 
 blk2:
 Statements:
 End:
-  Match(match core::felt252_is_zero(v0) {
-    IsZeroResult::Zero => blk3,
-    IsZeroResult::NonZero(v2) => blk4,
-  })
+  Goto(blk4, {})
 
 blk3:
 Statements:
-  (v3: core::felt252) <- 1u
 End:
-  Goto(blk1, {v3 -> v1})
+  Goto(blk4, {})
 
 blk4:
 Statements:
-  (v4: core::felt252) <- 1u
+  (v3: core::felt252) <- 1
 End:
-  Goto(blk1, {v4 -> v1})
+  Goto(blk5, {v3 -> v1})
+
+blk5:
+Statements:
+End:
+  Return(v1)
 
 //! > lowering_diagnostics

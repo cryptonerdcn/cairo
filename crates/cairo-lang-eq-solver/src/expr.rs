@@ -1,22 +1,22 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use cairo_lang_utils::collection_arithmetics::{add_maps, sub_maps, HasZero};
+use cairo_lang_utils::collection_arithmetics::{AddCollection, HasZero, SubCollection};
 use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
 
 #[cfg(test)]
 #[path = "expr_test.rs"]
 mod test;
 
-/// An linear expression of variables.
+/// A linear expression of variables.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Expr<Var: Clone + Debug + PartialEq + Eq + Hash> {
+pub struct Expr<Var: Clone + Debug + Eq + Hash> {
     /// The constant term of the expression.
     pub const_term: i32,
     /// The coefficient for every variable in the expression.
     pub var_to_coef: OrderedHashMap<Var, i64>,
 }
-impl<Var: Clone + Debug + PartialEq + Eq + Hash> Expr<Var> {
+impl<Var: Clone + Debug + Eq + Hash> Expr<Var> {
     /// Creates a cost expression based on const value only.
     pub fn from_const(const_term: i32) -> Self {
         Self { const_term, var_to_coef: Default::default() }
@@ -28,29 +28,39 @@ impl<Var: Clone + Debug + PartialEq + Eq + Hash> Expr<Var> {
     }
 }
 
-impl<Var: Clone + Debug + PartialEq + Eq + Hash> HasZero for Expr<Var> {
+impl<Var: Clone + Debug + Eq + Hash> HasZero for Expr<Var> {
     fn zero() -> Self {
         Self::from_const(0)
     }
 }
 
 // Expr operators can be optimized if necessary.
-impl<Var: Clone + Debug + PartialEq + Eq + Hash> std::ops::Add for Expr<Var> {
+impl<Var: Clone + Debug + Eq + Hash> std::ops::Add for Expr<Var> {
     type Output = Self;
     fn add(self, other: Self) -> Self {
         Self {
             const_term: self.const_term + other.const_term,
-            var_to_coef: add_maps(self.var_to_coef, other.var_to_coef),
+            var_to_coef: self.var_to_coef.add_collection(other.var_to_coef),
         }
     }
 }
 
-impl<Var: Clone + Debug + PartialEq + Eq + Hash> std::ops::Sub for Expr<Var> {
+impl<Var: Clone + Debug + Eq + Hash> std::ops::Sub for Expr<Var> {
     type Output = Self;
     fn sub(self, other: Self) -> Self {
         Self {
             const_term: self.const_term - other.const_term,
-            var_to_coef: sub_maps(self.var_to_coef, other.var_to_coef),
+            var_to_coef: self.var_to_coef.sub_collection(other.var_to_coef),
         }
+    }
+}
+
+impl<Var: Clone + Debug + Eq + Hash> std::ops::Neg for Expr<Var> {
+    type Output = Self;
+    fn neg(mut self) -> Self {
+        for (_k, v) in self.var_to_coef.iter_mut() {
+            *v = -*v;
+        }
+        Self { const_term: -self.const_term, var_to_coef: self.var_to_coef }
     }
 }

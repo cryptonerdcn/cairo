@@ -2,14 +2,14 @@
 #[path = "collection_arithmetics_test.rs"]
 mod test;
 
-use std::hash::Hash;
-use std::ops::{Add, Sub};
+use core::hash::{BuildHasher, Hash};
+use core::ops::{Add, Sub};
 
-use indexmap::map::Entry;
+use crate::ordered_hash_map::{self, OrderedHashMap};
+#[cfg(feature = "std")]
+use crate::small_ordered_map::{self, SmallOrderedMap};
 
-use crate::ordered_hash_map::OrderedHashMap;
-
-/// A trait for types which have a zero value.
+/// A trait for types that have a zero value.
 ///
 /// Functions may assume the following:
 /// * `x = x + zero() = zero() + x`
@@ -28,65 +28,109 @@ impl HasZero for i64 {
     }
 }
 
-/// Returns a map which contains the sum of the values from the given two maps, for each key.
-///
-/// If the key is missing from one of them, it is treated as zero.
-pub fn add_maps<
-    Key: Hash + Eq,
-    Value: HasZero + Add<Output = Value> + Clone + Eq,
-    Rhs: IntoIterator<Item = (Key, Value)>,
->(
-    lhs: OrderedHashMap<Key, Value>,
-    rhs: Rhs,
-) -> OrderedHashMap<Key, Value> {
-    merge_maps(lhs, rhs, |a, b| a + b)
+/// A trait for types which support addition on collections.
+pub trait AddCollection<Key, Value> {
+    /// Returns a new collection with the sum of the values from the given two collections, for each
+    /// key.
+    ///
+    /// If the key is missing from one of them, it is treated as zero.
+    fn add_collection(self, other: impl IntoIterator<Item = (Key, Value)>) -> Self;
 }
 
-/// Returns a map which contains the difference of the values from the given two maps, for each key.
-///
-/// If the key is missing from one of them, it is treated as zero.
-pub fn sub_maps<
-    Key: Hash + Eq,
-    Value: HasZero + Sub<Output = Value> + Clone + Eq,
-    Rhs: IntoIterator<Item = (Key, Value)>,
->(
-    lhs: OrderedHashMap<Key, Value>,
-    rhs: Rhs,
-) -> OrderedHashMap<Key, Value> {
-    merge_maps(lhs, rhs, |a, b| a - b)
+/// A trait for types which support subtraction on collections.
+pub trait SubCollection<Key, Value> {
+    /// Returns a new collection with the difference of the values from the given two collections,
+    /// for each key.
+    ///
+    /// If the key is missing from one of them, it is treated as zero.
+    fn sub_collection(self, other: impl IntoIterator<Item = (Key, Value)>) -> Self;
 }
 
-/// Returns a map which contains the combination by using `action` of the values from the given two
-/// maps, for each key.
-///
-/// If the key is missing from one of them, it is treated as zero.
-fn merge_maps<
-    Key: Hash + Eq,
-    Value: HasZero + Clone + Eq,
-    Rhs: IntoIterator<Item = (Key, Value)>,
-    Action: Fn(Value, Value) -> Value,
->(
-    lhs: OrderedHashMap<Key, Value>,
-    rhs: Rhs,
-    action: Action,
-) -> OrderedHashMap<Key, Value> {
-    let mut res = lhs;
-    for (key, rhs_val) in rhs {
-        match res.entry(key) {
-            Entry::Occupied(mut e) => {
-                let new_val = action(e.get().clone(), rhs_val);
-                if new_val == Value::zero() {
-                    e.swap_remove();
-                } else {
-                    e.insert(new_val);
+pub trait MergeCollection<Key, Value> {
+    /// Returns a collection which contains the combination by using `action` of the values from the
+    /// given two collections, for each key.
+    ///
+    /// If the key is missing from one of them, it is treated as zero.
+    fn merge_collection(
+        self,
+        other: impl IntoIterator<Item = (Key, Value)>,
+        action: impl Fn(Value, Value) -> Value,
+    ) -> Self;
+}
+
+impl<Key, Value: Add<Output = Value>, T: MergeCollection<Key, Value>> AddCollection<Key, Value>
+    for T
+{
+    fn add_collection(self, other: impl IntoIterator<Item = (Key, Value)>) -> Self {
+        self.merge_collection(other, |a, b| a + b)
+    }
+}
+
+impl<Key, Value: Sub<Output = Value>, T: MergeCollection<Key, Value>> SubCollection<Key, Value>
+    for T
+{
+    fn sub_collection(self, other: impl IntoIterator<Item = (Key, Value)>) -> Self {
+        self.merge_collection(other, |a, b| a - b)
+    }
+}
+
+impl<Key: Hash + Eq, Value: HasZero + Clone + Eq, BH: BuildHasher> MergeCollection<Key, Value>
+    for OrderedHashMap<Key, Value, BH>
+{
+    fn merge_collection(
+        mut self,
+        other: impl IntoIterator<Item = (Key, Value)>,
+        action: impl Fn(Value, Value) -> Value,
+    ) -> Self {
+        for (key, other_val) in other {
+            match self.entry(key) {
+                ordered_hash_map::Entry::Occupied(mut e) => {
+                    let new_val = action(e.get().clone(), other_val);
+                    if new_val == Value::zero() {
+                        e.swap_remove();
+                    } else {
+                        e.insert(new_val);
+                    }
                 }
-            }
-            Entry::Vacant(e) => {
-                if rhs_val != Value::zero() {
-                    e.insert(action(Value::zero(), rhs_val));
+                ordered_hash_map::Entry::Vacant(e) => {
+                    let zero = Value::zero();
+                    if other_val != zero {
+                        e.insert(action(zero, other_val));
+                    }
                 }
             }
         }
+        self
     }
-    res
+}
+
+#[cfg(feature = "std")]
+impl<Key: Eq, Value: HasZero + Clone + Eq> MergeCollection<Key, Value>
+    for SmallOrderedMap<Key, Value>
+{
+    fn merge_collection(
+        mut self,
+        other: impl IntoIterator<Item = (Key, Value)>,
+        action: impl Fn(Value, Value) -> Value,
+    ) -> Self {
+        for (key, other_val) in other {
+            match self.entry(key) {
+                small_ordered_map::Entry::Occupied(mut e) => {
+                    let new_val = action(e.get().clone(), other_val);
+                    if new_val == Value::zero() {
+                        e.remove();
+                    } else {
+                        e.insert(new_val);
+                    }
+                }
+                small_ordered_map::Entry::Vacant(e) => {
+                    let zero = Value::zero();
+                    if other_val != zero {
+                        e.insert(action(zero, other_val));
+                    }
+                }
+            }
+        }
+        self
+    }
 }

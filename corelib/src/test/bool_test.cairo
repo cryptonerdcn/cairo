@@ -1,4 +1,4 @@
-use test::test_utils::{assert_eq, assert_ne};
+use crate::test::test_utils::{assert_eq, assert_ne};
 
 #[test]
 fn test_bool_operators() {
@@ -20,4 +20,10 @@ fn test_bool_operators() {
     assert(true ^ false, 't ^ f');
     assert(false ^ true, 'f ^ t');
     assert(!(true ^ true), '!(t ^ t)');
+}
+
+#[test]
+fn test_bool_conversion() {
+    assert_eq(@false.into(), @0, 'f.into() != 0');
+    assert_eq(@true.into(), @1, 't.into() != 1');
 }

@@ -3,22 +3,19 @@
 //! > test_runner_name
 block_generator_test
 
-//! > function
-fn foo() -> felt252 {
-    let x = 10;
+//! > function_code
+fn foo(x: felt252) -> felt252 {
     match x {
         0 => 3,
         _ => {
             let y = 4;
             y
-        }
+        },
     }
 }
 
 //! > function_name
 foo
-
-//! > module_code
 
 //! > semantic_diagnostics
 
@@ -27,27 +24,23 @@ foo
 //! > sierra_gen_diagnostics
 
 //! > sierra_code
-felt252_const<10>() -> ([0])
-felt252_is_zero([0]) { fallthrough() label0([1]) }
+felt252_is_zero([0]) { fallthrough() label_test::foo::0([1]) }
 branch_align() -> ()
-felt252_const<3>() -> ([2])
-PushValues([2]: felt252) -> ([3])
-jump() { label2() }
-label0:
+const_as_immediate<Const<felt252, 3>>() -> ([2])
+PushValues([2]: felt252) -> ([2])
+return([2])
+label_test::foo::0:
 branch_align() -> ()
 drop<NonZero<felt252>>([1]) -> ()
-felt252_const<4>() -> ([4])
-PushValues([4]: felt252) -> ([3])
-label2:
-PushValues([3]: felt252) -> ([5])
-return([5])
-label1:
+const_as_immediate<Const<felt252, 4>>() -> ([3])
+PushValues([3]: felt252) -> ([3])
+return([3])
+label_test::foo::1:
 
 //! > lowering_flat
-Parameters:
+Parameters: v0: core::felt252
 blk0 (root):
 Statements:
-  (v0: core::felt252) <- 10u
 End:
   Match(match core::felt252_is_zero(v0) {
     IsZeroResult::Zero => blk1,
@@ -56,20 +49,15 @@ End:
 
 blk1:
 Statements:
-  (v2: core::felt252) <- 3u
+  (v2: core::felt252) <- 3
 End:
-  Goto(blk3, {v2 -> v4})
+  Return(v2)
 
 blk2:
 Statements:
-  (v3: core::felt252) <- 4u
+  (v3: core::felt252) <- 4
 End:
-  Goto(blk3, {v3 -> v4})
-
-blk3:
-Statements:
-End:
-  Return(v4)
+  Return(v3)
 
 //! > ==========================================================================
 
@@ -78,9 +66,8 @@ End:
 //! > test_runner_name
 block_generator_test
 
-//! > function
-fn foo() -> felt252 {
-    let x = 7;
+//! > function_code
+fn foo(x: felt252) -> felt252 {
     match x {
         0 => x,
         _ => 7,
@@ -90,8 +77,6 @@ fn foo() -> felt252 {
 //! > function_name
 foo
 
-//! > module_code
-
 //! > semantic_diagnostics
 
 //! > lowering_diagnostics
@@ -99,28 +84,24 @@ foo
 //! > sierra_gen_diagnostics
 
 //! > sierra_code
-felt252_const<7>() -> ([0])
 dup<felt252>([0]) -> ([0], [1])
-felt252_is_zero([1]) { fallthrough() label0([2]) }
+felt252_is_zero([1]) { fallthrough() label_test::foo::0([2]) }
 branch_align() -> ()
-PushValues([0]: felt252) -> ([3])
-jump() { label2() }
-label0:
+PushValues([0]: felt252) -> ([0])
+return([0])
+label_test::foo::0:
 branch_align() -> ()
 drop<NonZero<felt252>>([2]) -> ()
 drop<felt252>([0]) -> ()
-felt252_const<7>() -> ([4])
-PushValues([4]: felt252) -> ([3])
-label2:
-PushValues([3]: felt252) -> ([5])
-return([5])
-label1:
+const_as_immediate<Const<felt252, 7>>() -> ([3])
+PushValues([3]: felt252) -> ([3])
+return([3])
+label_test::foo::1:
 
 //! > lowering_flat
-Parameters:
+Parameters: v0: core::felt252
 blk0 (root):
 Statements:
-  (v0: core::felt252) <- 7u
 End:
   Match(match core::felt252_is_zero(v0) {
     IsZeroResult::Zero => blk1,
@@ -130,18 +111,13 @@ End:
 blk1:
 Statements:
 End:
-  Goto(blk3, {v0 -> v3})
+  Return(v0)
 
 blk2:
 Statements:
-  (v2: core::felt252) <- 7u
+  (v2: core::felt252) <- 7
 End:
-  Goto(blk3, {v2 -> v3})
-
-blk3:
-Statements:
-End:
-  Return(v3)
+  Return(v2)
 
 //! > ==========================================================================
 
@@ -150,18 +126,16 @@ End:
 //! > test_runner_name
 block_generator_test
 
-//! > function
-fn foo(opt : Option<@felt252>) -> felt252 {
-  match opt {
-    Option::Some(x) => *x,
-    Option::None(_) => 0,
-  }
+//! > function_code
+fn foo(opt: Option<@felt252>) -> felt252 {
+    match opt {
+        Some(x) => *x,
+        None => 0,
+    }
 }
 
 //! > function_name
 foo
-
-//! > module_code
 
 //! > semantic_diagnostics
 
@@ -170,20 +144,18 @@ foo
 //! > sierra_gen_diagnostics
 
 //! > sierra_code
-enum_match<core::option::Option::<@core::felt252>>([0]) { fallthrough([1]) label0([2]) }
+enum_match<core::option::Option::<@core::felt252>>([0]) { fallthrough([1]) label_test::foo::0([2]) }
 branch_align() -> ()
 rename<felt252>([1]) -> ([3])
-PushValues([3]: felt252) -> ([4])
-jump() { label2() }
-label0:
+PushValues([3]: felt252) -> ([3])
+return([3])
+label_test::foo::0:
 branch_align() -> ()
 drop<Unit>([2]) -> ()
-felt252_const<0>() -> ([5])
-PushValues([5]: felt252) -> ([4])
-label2:
-PushValues([4]: felt252) -> ([6])
-return([6])
-label1:
+const_as_immediate<Const<felt252, 0>>() -> ([4])
+PushValues([4]: felt252) -> ([4])
+return([4])
+label_test::foo::1:
 
 //! > lowering_flat
 Parameters: v0: core::option::Option::<@core::felt252>
@@ -192,22 +164,165 @@ Statements:
 End:
   Match(match_enum(v0) {
     Option::Some(v1) => blk1,
-    Option::None(v3) => blk2,
+    Option::None(v2) => blk2,
   })
 
 blk1:
 Statements:
-  (v2: core::felt252) <- desnap(v1)
+  (v3: core::felt252) <- desnap(v1)
 End:
-  Goto(blk3, {v2 -> v5})
+  Return(v3)
 
 blk2:
 Statements:
-  (v4: core::felt252) <- 0u
+  (v4: core::felt252) <- 0
 End:
-  Goto(blk3, {v4 -> v5})
+  Return(v4)
+
+//! > ==========================================================================
+
+//! > Test dedup of panic code.
+
+//! > test_runner_name
+block_generator_test
+
+//! > function_code
+fn foo(mut a: Array<u32>) {
+    a.pop_front().unwrap();
+    a.pop_front().unwrap();
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > sierra_gen_diagnostics
+
+//! > sierra_code
+array_pop_front<u32>([0]) { fallthrough([1], [2]) label_test::foo::0([3]) }
+branch_align() -> ()
+drop<Box<u32>>([2]) -> ()
+array_pop_front<u32>([1]) { fallthrough([4], [5]) label_test::foo::2([6]) }
+branch_align() -> ()
+drop<Array<u32>>([4]) -> ()
+drop<Box<u32>>([5]) -> ()
+struct_construct<Unit>() -> ([7])
+struct_construct<Tuple<Unit>>([7]) -> ([8])
+enum_init<core::panics::PanicResult::<((),)>, 0>([8]) -> ([9])
+PushValues([9]: core::panics::PanicResult::<((),)>) -> ([9])
+return([9])
+label_test::foo::2:
+branch_align() -> ()
+drop<Array<u32>>([6]) -> ()
+PushValues() -> ()
+jump() { label_test::foo::4() }
+label_test::foo::3:
+label_test::foo::0:
+branch_align() -> ()
+drop<Array<u32>>([3]) -> ()
+PushValues() -> ()
+label_test::foo::4:
+PushValues() -> ()
+function_call<user@core::panic_with_const_felt252::<29721761890975875353235833581453094220424382983267374>>() -> ([10])
+enum_init<core::panics::PanicResult::<((),)>, 1>([10]) -> ([11])
+PushValues([11]: core::panics::PanicResult::<((),)>) -> ([11])
+return([11])
+label_test::foo::1:
+
+//! > lowering_flat
+Parameters: v0: core::array::Array::<core::integer::u32>
+blk0 (root):
+Statements:
+End:
+  Match(match core::array::array_pop_front::<core::integer::u32>(v0) {
+    Option::Some(v1, v2) => blk1,
+    Option::None(v3) => blk4,
+  })
+
+blk1:
+Statements:
+End:
+  Match(match core::array::array_pop_front::<core::integer::u32>(v1) {
+    Option::Some(v4, v5) => blk2,
+    Option::None(v6) => blk3,
+  })
+
+blk2:
+Statements:
+  (v7: ()) <- struct_construct()
+  (v8: ((),)) <- struct_construct(v7)
+  (v9: core::panics::PanicResult::<((),)>) <- PanicResult::Ok(v8)
+End:
+  Return(v9)
 
 blk3:
 Statements:
 End:
-  Return(v5)
+  Goto(blk5, {})
+
+blk4:
+Statements:
+End:
+  Goto(blk5, {})
+
+blk5:
+Statements:
+  (v10: (core::panics::Panic, core::array::Array::<core::felt252>)) <- core::panic_with_const_felt252::<29721761890975875353235833581453094220424382983267374>()
+  (v11: core::panics::PanicResult::<((),)>) <- PanicResult::Err(v10)
+End:
+  Return(v11)
+
+//! > ==========================================================================
+
+//! > Test single arm match (no branch_align needed).
+
+//! > test_runner_name
+block_generator_test
+
+//! > function_code
+fn foo(x: SingleVariant) -> felt252 {
+    match x {
+        SingleVariant::Only(v) => v + 1,
+    }
+}
+
+//! > module_code
+enum SingleVariant {
+    Only: felt252,
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > sierra_gen_diagnostics
+
+//! > sierra_code
+enum_match<test::SingleVariant>([0]) -> ([1])
+const_as_immediate<Const<felt252, 1>>() -> ([2])
+felt252_add([1], [2]) -> ([3])
+PushValues([3]: felt252) -> ([3])
+return([3])
+label_test::foo::0:
+
+//! > lowering_flat
+Parameters: v0: test::SingleVariant
+blk0 (root):
+Statements:
+End:
+  Match(match_enum(v0) {
+    SingleVariant::Only(v1) => blk1,
+  })
+
+blk1:
+Statements:
+  (v2: core::felt252) <- 1
+  (v3: core::felt252) <- core::felt252_add(v1, v2)
+End:
+  Return(v3)

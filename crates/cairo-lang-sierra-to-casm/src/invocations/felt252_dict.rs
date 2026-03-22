@@ -1,5 +1,3 @@
-use std::vec;
-
 use cairo_lang_casm::builder::{CasmBuildResult, CasmBuilder, Var};
 use cairo_lang_casm::casm_build_extend;
 use cairo_lang_sierra::extensions::felt252_dict::{
@@ -12,7 +10,7 @@ use cairo_lang_sierra_gas::core_libfunc_cost::{
 use cairo_lang_sierra_gas::objects::ConstCost;
 
 use super::{CompiledInvocation, CompiledInvocationBuilder, InvocationError};
-use crate::invocations::{add_input_variables, CostValidationInfo};
+use crate::invocations::{CostValidationInfo, add_input_variables};
 use crate::references::ReferenceExpression;
 
 const DICT_ACCESS_SIZE: i32 = 3;
@@ -33,7 +31,7 @@ fn build_felt252_dict_new(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {
     let [segment_arena_ptr] = builder.try_get_single_cells()?;
-    let mut casm_builder = CasmBuilder::default();
+    let mut casm_builder = CasmBuilder::with_capacity(9, 0);
     add_input_variables! {casm_builder, buffer(2) segment_arena_ptr; };
     casm_build_extend! {casm_builder,
         hint AllocFelt252Dict {segment_arena_ptr: segment_arena_ptr};
@@ -56,7 +54,7 @@ fn build_felt252_dict_new(
         casm_builder,
         [("Fallthrough", &[&[segment_arena_ptr], &[new_dict_end]], None)],
         CostValidationInfo {
-            range_check_info: None,
+            builtin_infos: vec![],
             // The segment arena finalization cost.
             extra_costs: Some([SEGMENT_ARENA_ALLOCATION_COST.cost()]),
         },
@@ -74,7 +72,7 @@ fn build_felt252_dict_squash(
     let mut unique_key_steps: i32 = 0;
     let mut repeated_access_steps: i32 = 0;
 
-    let mut casm_builder = CasmBuilder::default();
+    let mut casm_builder = CasmBuilder::with_capacity(135, 18);
     add_input_variables! {casm_builder,
         buffer(2) segment_arena_ptr;
         buffer(0) range_check_ptr;
@@ -123,7 +121,7 @@ fn build_felt252_dict_squash(
             // Guess the index of the dictionary.
             hint GetSegmentArenaIndex {
                 dict_end_ptr: dict_destruct_arg_dict_end_address
-            } into {dict_index: dict_index};
+            } into { dict_index };
             localvar infos = dict_destruct_arg_segment_arena_ptr[-3];
             localvar n_dicts = dict_destruct_arg_segment_arena_ptr[-2];
             localvar n_destructed = dict_destruct_arg_segment_arena_ptr[-1];
@@ -153,7 +151,7 @@ fn build_felt252_dict_squash(
             tempvar dict_squash_arg_range_check_ptr = dict_destruct_arg_range_check_ptr;
             tempvar dict_squash_arg_dict_accesses_start = info_ptr[0];
             tempvar dict_squash_arg_dict_accesses_end = dict_destruct_arg_dict_end_address;
-            // Compute the length of the accesses segment, and store it in a local variable.
+            // Compute the length of the access segment, and store it in a local variable.
             assert dict_accesses_len = dict_destruct_arg_dict_end_address -
                 dict_squash_arg_dict_accesses_start;
             let (range_check_ptr, squashed_dict_end, squashed_dict_start) = call SquashDict;
@@ -215,7 +213,12 @@ fn build_felt252_dict_squash(
     let unique_key_range_checks = 6;
     let repeated_access_range_checks = 1;
     assert_eq!(
-        ConstCost { steps: fixed_steps, holes: 0, range_checks: fixed_range_checks },
+        ConstCost {
+            steps: fixed_steps,
+            holes: 0,
+            range_checks: fixed_range_checks,
+            range_checks96: 0
+        },
         DICT_SQUASH_FIXED_COST
     );
     assert_eq!(
@@ -223,11 +226,17 @@ fn build_felt252_dict_squash(
             steps: repeated_access_steps,
             holes: 0,
             range_checks: repeated_access_range_checks,
+            range_checks96: 0
         },
         DICT_SQUASH_REPEATED_ACCESS_COST
     );
     assert_eq!(
-        ConstCost { steps: unique_key_steps, holes: 0, range_checks: unique_key_range_checks },
+        ConstCost {
+            steps: unique_key_steps,
+            holes: 0,
+            range_checks: unique_key_range_checks,
+            range_checks96: 0
+        },
         DICT_SQUASH_UNIQUE_KEY_COST
     );
     let CasmBuildResult { instructions, branches: [(state, _)] } =
@@ -293,7 +302,7 @@ fn build_squash_dict(
         localvar big_keys;
         localvar squashed_dict_start;
         ap += 3;
-        hint AllocSegment {} into {dst: squashed_dict_start};
+        hint AllocSegment into {dst: squashed_dict_start};
         jump SquashDictNotEmpty if ptr_diff != 0;
         tempvar returned_range_check_ptr = squash_dict_arg_range_check_ptr;
         tempvar returned_squashed_dict_start = squashed_dict_start;
@@ -307,7 +316,7 @@ fn build_squash_dict(
         hint InitSquashData {
             dict_accesses: squash_dict_arg_dict_accesses_start,
             ptr_diff: ptr_diff, n_accesses: n_accesses
-        } into {big_keys: big_keys, first_key: first_key};
+        } into { big_keys, first_key };
         let temp_range_check_ptr = squash_dict_arg_range_check_ptr;
         tempvar squash_dict_inner_arg_range_check_ptr;
         // Order of if branches is reversed w.r.t. the original code.
@@ -388,7 +397,7 @@ fn build_squash_dict_inner(
 
     casm_build_extend! {casm_builder,
         // Inner tail-recursive function for squash_dict.
-        // Loops over a single key accesses and verify a valid order.
+        // Loops over a single key accesses and verifies a valid order.
         SquashDictInner:
         #{ validate steps == 0; }
         const dict_access_size = DICT_ACCESS_SIZE;
@@ -400,7 +409,7 @@ fn build_squash_dict_inner(
         // Prepare first loop iteration.
         hint GetCurrentAccessIndex {
             range_check_ptr: squash_dict_inner_arg_range_check_ptr
-        } into {};
+        };
         // Range check use, once per unique key
         tempvar current_access_index = *squash_dict_inner_arg_range_check_ptr;
         tempvar ptr_delta = current_access_index * dict_access_size;
@@ -416,7 +425,7 @@ fn build_squash_dict_inner(
         assert first_value = first_access[1]; // The prev_value index is 1
         assert first_value = dict_diff[1];
         assert first_value = zero;
-        hint ShouldSkipSquashLoop {} into {should_skip_loop: should_skip_loop};
+        hint ShouldSkipSquashLoop into { should_skip_loop };
         rescope {
             squash_dict_inner_arg_dict_accesses_start =
                 squash_dict_inner_arg_dict_accesses_start,
@@ -477,9 +486,9 @@ fn build_squash_dict_inner(
         #{ unique_key_steps += steps; steps = 0; }
         jump SquashDictInnerContinueRecursion if new_remaining_accesses != 0;
         // Return from squash_dict_inner, push values to the stack and return;
-        tempvar retuened_range_check_ptr = arg_range_check_ptr;
+        tempvar returned_range_check_ptr = arg_range_check_ptr;
         const dict_access_size = DICT_ACCESS_SIZE;
-        tempvar retuened_squashed_dict =
+        tempvar returned_squashed_dict =
             squash_dict_inner_arg_squashed_dict_end + dict_access_size;
         ret;
         #{ fixed_steps += steps; steps = 0; }
@@ -487,7 +496,7 @@ fn build_squash_dict_inner(
     // Split just to avoid recursion limit when the macro is parsed.
     casm_build_extend! {casm_builder,
         SquashDictInnerContinueRecursion:
-        hint GetNextDictKey {} into {next_key: next_key};
+        hint GetNextDictKey into { next_key };
         // The if order is reversed w.r.t. the original code since the fallthrough case in the
         // original code is the big_keys != 0 case.
         jump SquashDictInnerIfBigKeys if squash_dict_inner_arg_big_keys != 0;
@@ -585,7 +594,7 @@ fn build_squash_dict_inner_loop(
         tempvar loop_locals_access_ptr;
         tempvar loop_locals_value;
         tempvar loop_locals_range_check_ptr;
-        hint GetCurrentAccessDelta {} into {index_delta_minus1: loop_temps_index_delta_minus1};
+        hint GetCurrentAccessDelta into {index_delta_minus1: loop_temps_index_delta_minus1};
         // Check that the transition from the previous access to the current is valid.
         // Range check use, once per access
         assert loop_temps_index_delta_minus1 = *prev_loop_locals_range_check_ptr;
@@ -596,7 +605,7 @@ fn build_squash_dict_inner_loop(
         assert loop_locals_value = loop_locals_access_ptr[2];
         assert squash_dict_inner_arg_key = loop_locals_access_ptr[0];
         assert loop_locals_range_check_ptr = prev_loop_locals_range_check_ptr + one;
-        hint ShouldContinueSquashLoop {} into {should_continue: loop_temps_should_continue};
+        hint ShouldContinueSquashLoop into {should_continue: loop_temps_should_continue};
         rescope {
             squash_dict_inner_arg_dict_accesses_start =
                 squash_dict_inner_arg_dict_accesses_start,
@@ -652,7 +661,7 @@ fn validate_felt252_le(casm_builder: &mut CasmBuilder, range_check: Var, a: Var,
         // ceil((PRIME / 2) / 2 ** 128).
         const prime_over_2_high = 5316911983139663648412552867652567041_u128;
         // Guess two arc lengths.
-        hint AssertLeFindSmallArcs {range_check_ptr: range_check, a: a, b: b} into {};
+        hint AssertLeFindSmallArcs { range_check_ptr: range_check, a, b };
         // Calculate the arc lengths.
         // Range check use, 4 times, once per unique key
         tempvar arc_short_low = *(range_check++);
@@ -668,7 +677,7 @@ fn validate_felt252_le(casm_builder: &mut CasmBuilder, range_check: Var, a: Var,
         // First, choose which arc to exclude from {0 -> a, a -> b, b -> PRIME - 1}.
         // Then, to compare the set of two arc lengths, compare their sum and product.
         tempvar skip_exclude_a_flag;
-        hint AssertLeIsFirstArcExcluded {} into {skip_exclude_a_flag: skip_exclude_a_flag};
+        hint AssertLeIsFirstArcExcluded into { skip_exclude_a_flag };
         jump AssertLeFelt252SkipExcludeA if skip_exclude_a_flag != 0;
         // Exclude "0 -> a".
         // The two arcs are (b - a) and (PRIME - 1 - b = -b - 1).
@@ -681,7 +690,7 @@ fn validate_felt252_le(casm_builder: &mut CasmBuilder, range_check: Var, a: Var,
         jump EndOfFelt252Le;
         AssertLeFelt252SkipExcludeA:
         tempvar skip_exclude_b_minus_a;
-        hint AssertLeIsSecondArcExcluded {} into {skip_exclude_b_minus_a: skip_exclude_b_minus_a};
+        hint AssertLeIsSecondArcExcluded into { skip_exclude_b_minus_a };
         jump AssertLeFelt252SkipExcludeBMinusA if skip_exclude_b_minus_a != 0;
         // Exclude "a -> b".
         // The two arcs are (a - 0 = a) and (PRIME - 1 - b = -b - 1).
@@ -719,10 +728,10 @@ fn build_felt252_dict_entry_get(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {
     let [dict_ptr, key] = builder.try_get_single_cells()?;
-    let mut casm_builder = CasmBuilder::default();
+    let mut casm_builder = CasmBuilder::with_capacity(1, 0);
     add_input_variables! {casm_builder, buffer(2) dict_ptr; deref key; };
     casm_build_extend! {casm_builder,
-        hint Felt252DictEntryInit {dict_ptr: dict_ptr, key: key} into {};
+        hint Felt252DictEntryInit { dict_ptr, key };
         assert key = *(dict_ptr++);
         let prev_value = *(dict_ptr++);
         // The new value will be written in the entry finalization.
@@ -732,7 +741,7 @@ fn build_felt252_dict_entry_get(
         casm_builder,
         [("Fallthrough", &[&[dict_ptr], &[prev_value]], None)],
         CostValidationInfo {
-            range_check_info: None,
+            builtin_infos: vec![],
             extra_costs: Some([DICT_SQUASH_UNIQUE_KEY_COST.cost()]),
         },
     ))
@@ -743,10 +752,10 @@ fn build_felt252_dict_entry_finalize(
     builder: CompiledInvocationBuilder<'_>,
 ) -> Result<CompiledInvocation, InvocationError> {
     let [dict_entry, new_value] = builder.try_get_single_cells()?;
-    let mut casm_builder = CasmBuilder::default();
+    let mut casm_builder = CasmBuilder::with_capacity(1, 0);
     add_input_variables! {casm_builder, buffer(0) dict_entry; deref new_value; };
     casm_build_extend! {casm_builder,
-        hint Felt252DictEntryUpdate { dict_ptr: dict_entry, value: new_value } into {};
+        hint Felt252DictEntryUpdate { dict_ptr: dict_entry, value: new_value };
         assert new_value = dict_entry[-1];
     };
     Ok(builder.build_from_casm_builder(

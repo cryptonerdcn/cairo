@@ -1,21 +1,20 @@
 use bimap::BiMap;
+use cairo_lang_utils::unordered_hash_map::UnorderedHashMap;
 use num_bigint::BigInt;
 use test_case::test_case;
 
-use super::value::CoreValue::{
-    self, Array, GasBuiltin, NonZero, RangeCheck, Uint128, Uint64, Uninitialized,
-};
 use super::LibfuncSimulationError::{
-    self, FunctionSimulationError, MemoryLayoutMismatch, WrongNumberOfArgs,
+    self, FunctionSimulationError, WrongArgType, WrongNumberOfArgs,
 };
-use super::{core, SimulationError};
+use super::value::CoreValue::{
+    self, Array, Felt252, GasBuiltin, RangeCheck, Uint32, Uint64, Uint128, Uninitialized,
+};
+use super::{SimulationError, core};
+use crate::extensions::GenericLibfunc;
 use crate::extensions::core::CoreLibfunc;
-use crate::extensions::lib_func::{
-    SierraApChange, SignatureSpecializationContext, SpecializationContext,
-};
+use crate::extensions::lib_func::{SignatureSpecializationContext, SpecializationContext};
 use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::types::TypeInfo;
-use crate::extensions::GenericLibfunc;
 use crate::ids::{ConcreteTypeId, FunctionId, GenericTypeId};
 use crate::program::{ConcreteTypeLongId, Function, FunctionSignature, GenericArg, StatementIdx};
 use crate::test_utils::build_bijective_mapping;
@@ -34,18 +33,43 @@ fn user_func_arg(name: &str) -> GenericArg {
 
 struct MockSpecializationContext {
     mapping: BiMap<ConcreteTypeId, ConcreteTypeLongId>,
+    type_infos: UnorderedHashMap<ConcreteTypeId, TypeInfo>,
 }
 impl MockSpecializationContext {
     pub fn new() -> Self {
-        Self { mapping: build_bijective_mapping() }
+        let mapping = build_bijective_mapping();
+        let mut type_infos = UnorderedHashMap::<ConcreteTypeId, TypeInfo>::default();
+        for name in ["u128", "u64"] {
+            let key = name.into();
+            let long_id = mapping.get_by_left(&key).unwrap().clone();
+            type_infos.insert(
+                key,
+                TypeInfo {
+                    long_id,
+                    storable: true,
+                    droppable: true,
+                    duplicatable: true,
+                    zero_sized: false,
+                },
+            );
+        }
+        let key = "ArrayU128".into();
+        let long_id = mapping.get_by_left(&key).unwrap().clone();
+        type_infos.insert(
+            key,
+            TypeInfo {
+                long_id,
+                storable: true,
+                droppable: true,
+                duplicatable: false,
+                zero_sized: false,
+            },
+        );
+        Self { mapping, type_infos }
     }
 }
 
 impl SpecializationContext for MockSpecializationContext {
-    fn upcast(&self) -> &dyn SignatureSpecializationContext {
-        self
-    }
-
     fn try_get_function(&self, function_id: &FunctionId) -> Option<Function> {
         ["drop_all_inputs", "identity", "unimplemented"]
             .into_iter()
@@ -55,34 +79,8 @@ impl SpecializationContext for MockSpecializationContext {
     }
 }
 impl TypeSpecializationContext for MockSpecializationContext {
-    fn try_get_type_info(&self, id: ConcreteTypeId) -> Option<TypeInfo> {
-        if id == "u128".into() || id == "u64".into() || id == "NonZeroInt".into() {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: true,
-                droppable: true,
-                duplicatable: true,
-                zero_sized: false,
-            })
-        } else if id == "UninitializedInt".into() {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: false,
-                droppable: true,
-                duplicatable: false,
-                zero_sized: true,
-            })
-        } else if id == "ArrayU128".into() {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: true,
-                droppable: true,
-                duplicatable: false,
-                zero_sized: false,
-            })
-        } else {
-            None
-        }
+    fn try_get_type_info(&self, id: &ConcreteTypeId) -> Option<&TypeInfo> {
+        self.type_infos.get(id)
     }
 }
 impl SignatureSpecializationContext for MockSpecializationContext {
@@ -101,14 +99,6 @@ impl SignatureSpecializationContext for MockSpecializationContext {
 
     fn try_get_function_signature(&self, function_id: &FunctionId) -> Option<FunctionSignature> {
         self.try_get_function(function_id).map(|f| f.signature)
-    }
-
-    fn as_type_specialization_context(&self) -> &dyn TypeSpecializationContext {
-        self
-    }
-
-    fn try_get_function_ap_change(&self, _function_id: &FunctionId) -> Option<SierraApChange> {
-        Some(SierraApChange::Unknown)
     }
 }
 
@@ -145,7 +135,7 @@ fn simulate(
 #[test_case("withdraw_gas", vec![], vec![RangeCheck, GasBuiltin(2)]
              => Ok((vec![RangeCheck, GasBuiltin(2)], 1)); "withdraw_gas(2)")]
 #[test_case("u128_is_zero", vec![], vec![Uint128(2)]
-             => Ok((vec![NonZero(Box::new(Uint128(2)))], 1)); "u128_is_zero(2)")]
+             => Ok((vec![Uint128(2)], 1)); "u128_is_zero(2)")]
 #[test_case("u128_is_zero", vec![], vec![Uint128(0)] => Ok((vec![], 0)); "u128_is_zero(0)")]
 #[test_case("jump", vec![], vec![] => Ok((vec![], 0)); "jump()")]
 #[test_case("u128_overflowing_add", vec![], vec![RangeCheck, Uint128(2), Uint128(3)]
@@ -170,18 +160,18 @@ fn simulate_branch(
 #[test_case("array_new", vec![type_arg("u128")], vec![] => Ok(vec![Array(vec![])]); "array_new()")]
 #[test_case("array_append", vec![type_arg("u128")], vec![Array(vec![]), Uint128(4)] =>
             Ok(vec![Array(vec![Uint128(4)])]); "array_append([], 4)")]
-#[test_case("array_get", vec![type_arg("u128")], vec![RangeCheck, Array(vec![Uint128(5)]), Uint64(0)]
+#[test_case("array_get", vec![type_arg("u128")], vec![RangeCheck, Array(vec![Uint128(5)]), Uint32(0)]
              => Ok(vec![RangeCheck, Uint128(5)]); "array_get([5], 0)")]
 #[test_case("array_len", vec![type_arg("u128")], vec![Array(vec![])] =>
-            Ok(vec![Uint64(0)]); "array_len([])")]
-#[test_case("u128_safe_divmod", vec![], vec![RangeCheck, Uint128(32), NonZero(Box::new(Uint128(5)))]
+            Ok(vec![Uint32(0)]); "array_len([])")]
+#[test_case("u128_safe_divmod", vec![], vec![RangeCheck, Uint128(32), Uint128(5)]
              => Ok(vec![RangeCheck, Uint128(6), Uint128(2)]); "u128_safe_divmod(32, 5)")]
 #[test_case("u128_const", vec![value_arg(3)], vec![] => Ok(vec![Uint128(3)]);
             "u128_const<3>()")]
 #[test_case("dup", vec![type_arg("u128")], vec![Uint128(24)]
              => Ok(vec![Uint128(24), Uint128(24)]); "dup<u128>(24)")]
 #[test_case("drop", vec![type_arg("u128")], vec![Uint128(2)] => Ok(vec![]); "drop<u128>(2)")]
-#[test_case("unwrap_non_zero", vec![type_arg("u128")], vec![NonZero(Box::new(Uint128(6)))]
+#[test_case("unwrap_non_zero", vec![type_arg("u128")], vec![Uint128(6)]
              => Ok(vec![Uint128(6)]); "unwrap_non_zero<u128>(6)")]
 #[test_case("store_temp", vec![type_arg("u128")], vec![Uint128(6)] => Ok(vec![Uint128(6)]);
             "store_temp<u128>(6)")]
@@ -194,6 +184,8 @@ fn simulate_branch(
              => Ok(vec![]); "function_call<drop_all_inputs>()")]
 #[test_case("function_call", vec![user_func_arg("identity")], vec![Uint128(3), Uint128(5)]
              => Ok(vec![Uint128(3), Uint128(5)]); "function_call<identity>()")]
+#[test_case("u64_to_felt252", vec![], vec![Uint64(5)]
+             => Ok(vec![Felt252(5u64.into())]); "u64_to_felt252(5)")]
 fn simulate_none_branch(
     id: &str,
     generic_args: Vec<GenericArg>,
@@ -205,10 +197,10 @@ fn simulate_none_branch(
     })
 }
 
-#[test_case("withdraw_gas", vec![], vec![RangeCheck, Uninitialized] => MemoryLayoutMismatch;
+#[test_case("withdraw_gas", vec![], vec![RangeCheck, Uninitialized] => WrongArgType;
             "withdraw_gas(empty)")]
 #[test_case("withdraw_gas", vec![], vec![] => WrongNumberOfArgs; "withdraw_gas()")]
-#[test_case("redeposit_gas", vec![], vec![Uninitialized] => MemoryLayoutMismatch;
+#[test_case("redeposit_gas", vec![], vec![Uninitialized] => WrongArgType;
             "redeposit_gas(empty)")]
 #[test_case("redeposit_gas", vec![], vec![] => WrongNumberOfArgs; "redeposit_gas()")]
 #[test_case("u128_overflowing_add", vec![], vec![RangeCheck, Uint128(1)] => WrongNumberOfArgs;
@@ -222,8 +214,6 @@ fn simulate_none_branch(
 #[test_case("dup", vec![type_arg("u128")], vec![] => WrongNumberOfArgs; "dup<u128>()")]
 #[test_case("drop", vec![type_arg("u128")], vec![] => WrongNumberOfArgs; "drop<u128>()")]
 #[test_case("u128_is_zero", vec![], vec![] => WrongNumberOfArgs; "u128_is_zero()")]
-#[test_case("unwrap_non_zero", vec![type_arg("u128")], vec![] => WrongNumberOfArgs;
-            "unwrap_non_zero<u128>()")]
 #[test_case("store_temp", vec![type_arg("u128")], vec![] => WrongNumberOfArgs;
             "store_temp<u128>()")]
 #[test_case("store_local", vec![type_arg("u128")], vec![] => WrongNumberOfArgs;
@@ -231,6 +221,8 @@ fn simulate_none_branch(
 #[test_case("finalize_locals", vec![], vec![Uint128(4)] => WrongNumberOfArgs; "finalize_locals(4)")]
 #[test_case("rename", vec![type_arg("u128")], vec![] => WrongNumberOfArgs; "rename<u128>()")]
 #[test_case("jump", vec![], vec![Uint128(4)] => WrongNumberOfArgs; "jump(4)")]
+#[test_case("u64_to_felt252", vec![], vec![RangeCheck, Uint64(1)] => WrongNumberOfArgs;
+            "u64_to_felt252(RangeCheck, 1)")]
 #[test_case("function_call", vec![user_func_arg("unimplemented")], vec![] =>
             FunctionSimulationError(
                 "unimplemented".into(),

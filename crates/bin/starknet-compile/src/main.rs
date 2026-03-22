@@ -3,23 +3,35 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use cairo_lang_compiler::CompilerConfig;
-use cairo_lang_starknet::allowed_libfuncs::ListSelector;
-use cairo_lang_starknet::contract_class::starknet_compile;
+use cairo_lang_compiler::diagnostics::DiagnosticsReporter;
+use cairo_lang_compiler::project::check_compiler_path;
+use cairo_lang_starknet::compile::starknet_compile;
+use cairo_lang_starknet_classes::allowed_libfuncs::ListSelector;
 use clap::Parser;
 
-/// Command line args parser.
-/// Exits with 0/1 if the input is formatted correctly/incorrectly.
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// Compiles the specified contract from a Cairo project, into a contract class file.
+/// Exits with 0/1 if the compilation succeeds/fails.
 #[derive(Parser, Debug)]
-#[clap(version, verbatim_doc_comment)]
+#[command(version, verbatim_doc_comment)]
 struct Args {
-    /// The crate to compile.
+    /// The path of the crate to compile.
     path: PathBuf,
+    /// Whether path is a single file.
+    #[arg(short, long)]
+    single_file: bool,
+    /// Allows the compilation to succeed with warnings.
+    #[arg(long)]
+    allow_warnings: bool,
     // The contract fully qualified path.
     #[arg(short, long)]
     contract_path: Option<String>,
     /// The output file name (default: stdout).
     output: Option<String>,
-    /// Replaces sierra ids with human-readable ones.
+    /// Replaces Sierra IDs with human-readable ones.
     #[arg(short, long, default_value_t = false)]
     replace_ids: bool,
     /// The allowed libfuncs list to use (default: most recent audited list).
@@ -32,13 +44,27 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // Check if args.path is a file or a directory.
+    check_compiler_path(args.single_file, &args.path)?;
+
     let list_selector =
-        ListSelector::new(args.allowed_libfuncs_list_name, args.allowed_libfuncs_list_file)
-            .expect("Both allowed libfunc list name and file were supplied.");
+        ListSelector::new(args.allowed_libfuncs_list_name, args.allowed_libfuncs_list_file).expect(
+            "Cannot supply both --allowed-libfuncs-list-name and --allowed-libfuncs-list-file",
+        );
+    let mut diagnostics_reporter = DiagnosticsReporter::stderr();
+    if args.allow_warnings {
+        diagnostics_reporter = diagnostics_reporter.allow_warnings();
+    }
     let res = starknet_compile(
         args.path,
         args.contract_path,
-        Some(CompilerConfig { replace_ids: args.replace_ids, ..CompilerConfig::default() }),
+        Some(CompilerConfig {
+            replace_ids: args.replace_ids,
+            diagnostics_reporter,
+            ..CompilerConfig::default()
+        }),
+        Default::default(),
         Some(list_selector),
     )?;
     match args.output {

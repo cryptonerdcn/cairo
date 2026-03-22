@@ -1,10 +1,10 @@
+use cairo_lang_test_utils::test;
 use indoc::indoc;
-use test_log::test;
 
+use crate::ProgramParser;
 use crate::extensions::core::{CoreLibfunc, CoreType};
 use crate::program::{ConcreteTypeLongId, TypeDeclaration};
 use crate::program_registry::{ProgramRegistry, ProgramRegistryError};
-use crate::ProgramParser;
 
 #[test]
 fn basic_insertion() {
@@ -15,10 +15,15 @@ fn basic_insertion() {
                     type u128 = u128;
                     type GasBuiltin = GasBuiltin;
                     type NonZeroInt = NonZero<u128>;
+
                     libfunc rename_u128 = rename<u128>;
                     libfunc rename_gb = rename<GasBuiltin>;
-                    Func1@1(a: u128, gb: GasBuiltin) -> (GasBuiltin);
-                    Func2@6() -> ();
+
+                    return();
+                    return();
+
+                    Func1@0(a: u128, gb: GasBuiltin) -> (GasBuiltin);
+                    Func2@1() -> ();
                 "})
                 .unwrap()
         )

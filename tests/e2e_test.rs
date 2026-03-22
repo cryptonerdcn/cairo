@@ -1,26 +1,63 @@
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex};
+use std::sync::{LazyLock, Mutex};
 
 use cairo_lang_compiler::db::RootDatabase;
 use cairo_lang_compiler::diagnostics::DiagnosticsReporter;
-use cairo_lang_filesystem::db::FilesGroupEx;
-use cairo_lang_filesystem::flag::Flag;
-use cairo_lang_filesystem::ids::FlagId;
+use cairo_lang_filesystem::flag::{Flag, FlagsGroup};
+use cairo_lang_filesystem::ids::FlagLongId;
+use cairo_lang_lowering::db::lowering_group_input;
+use cairo_lang_lowering::optimizations::config::{OptimizationConfig, Optimizations};
+use cairo_lang_runner::{Arg, RunResultValue, SierraCasmRunner};
 use cairo_lang_semantic::test_utils::setup_test_module;
+use cairo_lang_sierra::extensions::gas::{CostTokenMap, CostTokenType};
+use cairo_lang_sierra::ids::FunctionId;
+use cairo_lang_sierra::program::{Function, Program};
 use cairo_lang_sierra_generator::db::SierraGenGroup;
+use cairo_lang_sierra_generator::program_generator::SierraProgramWithDebug;
 use cairo_lang_sierra_generator::replace_ids::replace_sierra_ids_in_program;
-use cairo_lang_sierra_to_casm::test_utils::build_metadata;
-use cairo_lang_test_utils::parse_test_file::TestFileRunner;
+use cairo_lang_sierra_to_casm::compiler;
+use cairo_lang_sierra_to_casm::metadata::{MetadataComputationConfig, calc_metadata};
+use cairo_lang_sierra_type_size::ProgramRegistryInfo;
+use cairo_lang_test_utils::parse_test_file::{TestFileRunner, TestRunnerResult};
 use cairo_lang_test_utils::test_lock;
+use cairo_lang_utils::Intern;
 use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
-use cairo_lang_utils::Upcast;
+use cairo_lang_utils::unordered_hash_map::UnorderedHashMap;
 use itertools::Itertools;
-use once_cell::sync::Lazy;
+use salsa::Setter;
+use starknet_types_core::felt::Felt as Felt252;
 
-/// Salsa database configured to find the corelib, when reused by different tests should be able to
+/// Salsa databases configured to find the corelib, when reused by different tests should be able to
 /// use the cached queries that rely on the corelib's code, which vastly reduces the tests runtime.
-static SHARED_DB: Lazy<Mutex<RootDatabase>> =
-    Lazy::new(|| Mutex::new(RootDatabase::builder().detect_corelib().build().unwrap()));
+static SHARED_DB_WITH_GAS_NO_OPTS: LazyLock<Mutex<RootDatabase>> = LazyLock::new(|| {
+    let mut db = RootDatabase::builder().detect_corelib().build().unwrap();
+    lowering_group_input(&db).set_optimizations(&mut db).to(Some(Optimizations::Enabled(
+        OptimizationConfig::default().with_skip_const_folding(true),
+    )));
+    Mutex::new(db)
+});
+static SHARED_DB_NO_GAS_NO_OPTS: LazyLock<Mutex<RootDatabase>> = LazyLock::new(|| {
+    let mut db = RootDatabase::builder().detect_corelib().skip_auto_withdraw_gas().build().unwrap();
+    lowering_group_input(&db).set_optimizations(&mut db).to(Some(Optimizations::Enabled(
+        OptimizationConfig::default().with_skip_const_folding(true),
+    )));
+    Mutex::new(db)
+});
+static SHARED_DB_WITH_OPTS: LazyLock<Mutex<RootDatabase>> = LazyLock::new(|| {
+    let mut db = RootDatabase::builder().detect_corelib().skip_auto_withdraw_gas().build().unwrap();
+    lowering_group_input(&db)
+        .set_optimizations(&mut db)
+        .to(Some(Optimizations::Enabled(Default::default())));
+    Mutex::new(db)
+});
+static SHARED_DB_FUTURE_SIERRA: LazyLock<Mutex<RootDatabase>> = LazyLock::new(|| {
+    let mut db = RootDatabase::builder().detect_corelib().build().unwrap();
+    lowering_group_input(&db).set_optimizations(&mut db).to(Some(Optimizations::Enabled(
+        OptimizationConfig::default().with_skip_const_folding(true),
+    )));
+    db.set_flag(FlagLongId(Flag::FUTURE_SIERRA.into()), Some(Flag::FutureSierra(true)));
+    Mutex::new(db)
+});
 
 cairo_lang_test_utils::test_file_test_with_runner!(
     general_e2e,
@@ -37,25 +74,41 @@ cairo_lang_test_utils::test_file_test_with_runner!(
     {
         array: "array",
         bitwise: "bitwise",
+        blake: "blake",
         bool: "bool",
+        bounded_int: "bounded_int",
         box_: "box",
         builtin_costs: "builtin_costs",
         casts: "casts",
+        circuit: "circuit",
+        coupon: "coupon",
         ec: "ec",
         enum_: "enum",
         enum_snapshot: "enum_snapshot",
         felt252_dict: "felt252_dict",
+        felt252_downcast: "felt252_downcast",
         felt252: "felt252",
+        fixed_size_array: "fixed_size_array",
+        gas_reserve: "gas_reserve",
+        i128: "i128",
+        i16: "i16",
+        i32: "i32",
+        i64: "i64",
+        i8: "i8",
         nullable: "nullable",
         poseidon: "poseidon",
+        qm31: "qm31",
+        range: "range",
         snapshot: "snapshot",
         u128: "u128",
         u16: "u16",
+        bytes31: "bytes31",
         u256: "u256",
         u32: "u32",
         u512: "u512",
         u64: "u64",
         u8: "u8",
+        casm_run_sanity: "casm_run_sanity",
     },
     SmallE2ETestRunner
 );
@@ -67,6 +120,15 @@ cairo_lang_test_utils::test_file_test_with_runner!(
         gas: "gas",
     },
     SmallE2ETestRunnerSkipAddGas
+);
+
+cairo_lang_test_utils::test_file_test_with_runner!(
+    libfunc_e2e_withopts,
+    "e2e_test_data/libfuncs",
+    {
+        consts: "consts",
+    },
+    WithOptsE2ETestRunner
 );
 
 cairo_lang_test_utils::test_file_test_with_runner!(
@@ -83,81 +145,339 @@ cairo_lang_test_utils::test_file_test_with_runner!(
     SmallE2ETestRunner
 );
 
+cairo_lang_test_utils::test_file_test_with_runner!(
+    metadata_e2e,
+    "e2e_test_data",
+    {
+        metadata_computation: "metadata_computation",
+    },
+    SmallE2ETestRunnerMetadataComputation
+);
+
 #[derive(Default)]
 struct SmallE2ETestRunner;
 impl TestFileRunner for SmallE2ETestRunner {
-    fn run(&mut self, inputs: &OrderedHashMap<String, String>) -> OrderedHashMap<String, String> {
-        let mut locked_db = test_lock(&SHARED_DB);
-        // Parse code and create semantic model.
-        let test_module =
-            setup_test_module(locked_db.deref_mut(), inputs["cairo"].as_str()).unwrap();
-        let db = locked_db.snapshot();
-        DiagnosticsReporter::stderr().ensure(&db).unwrap();
+    fn run(
+        &mut self,
+        inputs: &OrderedHashMap<String, String>,
+        args: &OrderedHashMap<String, String>,
+    ) -> TestRunnerResult {
+        let future_sierra = args.get("future_sierra").is_some_and(|v| v == "true");
+        let skip_gas = args.get("skip_gas").is_some_and(|v| v == "true");
 
-        // Compile to Sierra.
-        let sierra_program = db.get_sierra_program(vec![test_module.crate_id]).unwrap();
-        let sierra_program = replace_sierra_ids_in_program(&db, &sierra_program);
-        let sierra_program_str = sierra_program.to_string();
+        let test_data = match TestData::parse(args) {
+            Ok(td) => td,
+            Err(e) => {
+                return TestRunnerResult { outputs: OrderedHashMap::default(), error: Some(e) };
+            }
+        };
 
-        // Compute the metadata.
-        let metadata = build_metadata(&sierra_program, true);
-        let function_costs_str = metadata
-            .gas_info
-            .function_costs
-            .iter()
-            .map(|(func_id, cost)| format!("{func_id}: {cost:?}"))
-            .join("\n");
+        run_e2e_test(
+            inputs,
+            E2eTestParams {
+                future_sierra,
+                test_data,
+                add_withdraw_gas: !skip_gas,
+                ..E2eTestParams::default()
+            },
+        )
+    }
 
-        // Compile to casm.
-        let casm = cairo_lang_sierra_to_casm::compiler::compile(&sierra_program, &metadata, true)
-            .unwrap()
-            .to_string();
+    fn allowed_arg(&self, arg: &str) -> bool {
+        ["future_sierra", "skip_gas", "test_data_function", "test_data_input", "test_data_output"]
+            .contains(&arg)
+    }
+}
 
-        OrderedHashMap::from([
-            ("casm".into(), casm),
-            ("function_costs".into(), function_costs_str),
-            ("sierra_code".into(), sierra_program_str),
-        ])
+#[derive(Default)]
+struct WithOptsE2ETestRunner;
+impl TestFileRunner for WithOptsE2ETestRunner {
+    fn run(
+        &mut self,
+        inputs: &OrderedHashMap<String, String>,
+        _args: &OrderedHashMap<String, String>,
+    ) -> TestRunnerResult {
+        run_e2e_test(
+            inputs,
+            E2eTestParams { skip_optimization_passes: false, ..Default::default() },
+        )
     }
 }
 
 #[derive(Default)]
 struct SmallE2ETestRunnerSkipAddGas;
 impl TestFileRunner for SmallE2ETestRunnerSkipAddGas {
-    fn run(&mut self, inputs: &OrderedHashMap<String, String>) -> OrderedHashMap<String, String> {
-        let mut locked_db = test_lock(&SHARED_DB);
-        let add_withdraw_gas_flag_id =
-            FlagId::new(locked_db.snapshot().upcast(), "add_withdraw_gas");
-        locked_db.set_flag(add_withdraw_gas_flag_id, Some(Arc::new(Flag::AddWithdrawGas(false))));
-        // Parse code and create semantic model.
-        let test_module =
-            setup_test_module(locked_db.deref_mut(), inputs["cairo"].as_str()).unwrap();
-        let db = locked_db.snapshot();
-        DiagnosticsReporter::stderr().ensure(&db).unwrap();
+    fn run(
+        &mut self,
+        inputs: &OrderedHashMap<String, String>,
+        _args: &OrderedHashMap<String, String>,
+    ) -> TestRunnerResult {
+        run_e2e_test(inputs, E2eTestParams { add_withdraw_gas: false, ..E2eTestParams::default() })
+    }
+}
 
-        // Compile to Sierra.
-        let sierra_program = db.get_sierra_program(vec![test_module.crate_id]).unwrap();
-        let sierra_program = replace_sierra_ids_in_program(&db, &sierra_program);
-        let sierra_program_str = sierra_program.to_string();
+#[derive(Default)]
+struct SmallE2ETestRunnerMetadataComputation;
+impl TestFileRunner for SmallE2ETestRunnerMetadataComputation {
+    fn run(
+        &mut self,
+        inputs: &OrderedHashMap<String, String>,
+        _args: &OrderedHashMap<String, String>,
+    ) -> TestRunnerResult {
+        run_e2e_test(
+            inputs,
+            E2eTestParams {
+                add_withdraw_gas: false,
+                metadata_computation: true,
+                skip_optimization_passes: true,
+                ..Default::default()
+            },
+        )
+    }
+}
 
-        // Compute the metadata.
-        let metadata = build_metadata(&sierra_program, true);
-        let function_costs_str = metadata
+/// Represents test data for function execution: function_name(input)=output
+#[derive(Clone, Debug)]
+struct TestData {
+    function_name: String,
+    input: Vec<Felt252>,
+    expected_output: Vec<Felt252>,
+}
+
+impl TestData {
+    /// Parses test_data. Expects three args: test_data_function, test_data_input, test_data_output.
+    fn parse(args: &OrderedHashMap<String, String>) -> Result<Option<TestData>, String> {
+        let Some(function_name) = args.get("test_data_function").cloned() else {
+            return Ok(None);
+        };
+        let Some((input, output)) = args.get("test_data_input").zip(args.get("test_data_output"))
+        else {
+            return Err("Given test_data_function both test_data_input and test_data_output must \
+                        be present as well."
+                .to_string());
+        };
+
+        let input = Felt252::from_dec_str(input)
+            .map_err(|e| format!("Failed to parse input as a felt '{}': {}", input, e))?;
+        let expected_output = Felt252::from_dec_str(output).map_err(|e| {
+            format!("Failed to parse expected output as a felt '{}': {}", output, e)
+        })?;
+
+        Ok(Some(TestData {
+            function_name,
+            input: vec![input],
+            expected_output: vec![expected_output],
+        }))
+    }
+}
+
+/// Represents the parameters of `run_e2e_test`.
+struct E2eTestParams {
+    /// Argument for `run_e2e_test` that controls whether to set the `add_withdraw_gas` flag
+    /// that automatically adds `withdraw_gas` calls.
+    add_withdraw_gas: bool,
+
+    /// Argument for `run_e2e_test` that controls whether to add metadata computation information
+    /// to the test outputs.
+    metadata_computation: bool,
+
+    /// Argument for `run_e2e_test` that controls whether to skip optimization passes.
+    skip_optimization_passes: bool,
+
+    /// Argument for `run_e2e_test` that controls whether to enable the `future_sierra` flag.
+    future_sierra: bool,
+
+    /// Test data for function execution validation.
+    test_data: Option<TestData>,
+}
+
+/// Implements default for `E2eTestParams`.
+impl Default for E2eTestParams {
+    fn default() -> Self {
+        Self {
+            add_withdraw_gas: true,
+            metadata_computation: false,
+            skip_optimization_passes: true,
+            future_sierra: false,
+            test_data: None,
+        }
+    }
+}
+
+/// Runs the e2e test.
+fn run_e2e_test(
+    inputs: &OrderedHashMap<String, String>,
+    params: E2eTestParams,
+) -> TestRunnerResult {
+    let mut locked_db = test_lock(if params.future_sierra {
+        &SHARED_DB_FUTURE_SIERRA
+    } else if !params.skip_optimization_passes {
+        &SHARED_DB_WITH_OPTS
+    } else if params.add_withdraw_gas {
+        &SHARED_DB_WITH_GAS_NO_OPTS
+    } else {
+        &SHARED_DB_NO_GAS_NO_OPTS
+    });
+    // Parse code and create semantic model.
+    let db_ref = locked_db.deref_mut();
+    let test_module = setup_test_module(db_ref, inputs["cairo_code"].as_str()).unwrap();
+    let crate_input = test_module.crate_id.long(db_ref).clone().into_crate_input(db_ref);
+    let db = locked_db.snapshot();
+    DiagnosticsReporter::stderr()
+        .with_crates(std::slice::from_ref(&crate_input))
+        .ensure(&db)
+        .unwrap();
+
+    // Compile to Sierra.
+    let SierraProgramWithDebug { program: sierra_program, .. } = db
+        .get_sierra_program(vec![crate_input.into_crate_long_id(&db).intern(&db)])
+        .expect("`get_sierra_program` failed. run with RUST_LOG=warn (or less) to see diagnostics");
+    let sierra_program = replace_sierra_ids_in_program(&db, sierra_program);
+    let program_info = ProgramRegistryInfo::new(&sierra_program).unwrap();
+    let sierra_program_str = sierra_program.to_string();
+
+    // Handle the `enforced_costs` argument.
+    let enforced_costs: OrderedHashMap<FunctionId, CostTokenMap<i32>> =
+        if let Some(enforced_costs_str) = inputs.get("enforced_costs") {
+            parse_enforced_costs(&sierra_program, enforced_costs_str)
+        } else {
+            Default::default()
+        };
+
+    // Compute the metadata.
+    let mut metadata_config = MetadataComputationConfig {
+        function_set_costs: enforced_costs,
+        compute_runtime_costs: params.metadata_computation,
+        ..Default::default()
+    };
+    let metadata_with_linear =
+        calc_metadata(&sierra_program, &program_info, metadata_config.clone()).unwrap();
+
+    let config =
+        compiler::SierraToCasmConfig { gas_usage_check: true, max_bytecode_size: usize::MAX };
+    // Compile to casm.
+    let casm = compiler::compile(&sierra_program, &program_info, &metadata_with_linear, config)
+        .map(|x| x.to_string())
+        .unwrap_or_else(|e| format!("failing with: `{e}`."));
+
+    let mut res: OrderedHashMap<String, String> =
+        OrderedHashMap::from([("casm".into(), casm), ("sierra_code".into(), sierra_program_str)]);
+    if params.metadata_computation {
+        metadata_config.linear_gas_solver = false;
+        metadata_config.linear_ap_change_solver = false;
+        metadata_config.skip_non_linear_solver_comparisons = true;
+        let metadata_with_lp =
+            calc_metadata(&sierra_program, &program_info, metadata_config).unwrap();
+        res.insert("gas_solution_lp".into(), format!("{}", metadata_with_lp.gas_info));
+        res.insert("gas_solution_linear".into(), format!("{}", metadata_with_linear.gas_info));
+        res.insert("ap_solution_lp".into(), format!("{}", metadata_with_lp.ap_change_info));
+        res.insert("ap_solution_linear".into(), format!("{}", metadata_with_linear.ap_change_info));
+
+        // Compile again, this time with the no-solver metadata.
+        compiler::compile(&sierra_program, &program_info, &metadata_with_lp, config).unwrap();
+    } else {
+        let function_costs_str = metadata_with_linear
             .gas_info
             .function_costs
             .iter()
             .map(|(func_id, cost)| format!("{func_id}: {cost:?}"))
             .join("\n");
-
-        // Compile to casm.
-        let casm = cairo_lang_sierra_to_casm::compiler::compile(&sierra_program, &metadata, true)
-            .unwrap()
-            .to_string();
-
-        OrderedHashMap::from([
-            ("casm".into(), casm),
-            ("function_costs".into(), function_costs_str),
-            ("sierra_code".into(), sierra_program_str),
-        ])
+        res.insert("function_costs".into(), function_costs_str);
     }
+
+    // Handle test_data if specified.
+    // This runs AFTER sierra/casm generation, so compilation outputs are always verified first.
+    if let Some(test_data) = params.test_data {
+        if let Err(e) =
+            run_and_validate_test_data(sierra_program, test_data, params.add_withdraw_gas)
+        {
+            return TestRunnerResult { outputs: res, error: Some(e) };
+        }
+    }
+
+    TestRunnerResult::success(res)
+}
+
+/// Runs the specified function and validates its output against expected values.
+fn run_and_validate_test_data(
+    sierra_program: Program,
+    test_data: TestData,
+    withdraw_gas: bool,
+) -> Result<(), String> {
+    let runner = SierraCasmRunner::new(
+        sierra_program,
+        withdraw_gas.then(Default::default),
+        Default::default(),
+        None,
+    )
+    .expect("Failed setting up runner for test_data.");
+
+    let func = runner
+        .find_function(&test_data.function_name)
+        .map_err(|e| format!("Function '{}' not found: {}", test_data.function_name, e))?;
+
+    let result = runner
+        .run_function_with_starknet_context(
+            func,
+            test_data.input.into_iter().map(Arg::Value).collect_vec(),
+            withdraw_gas.then_some(usize::MAX),
+            Default::default(),
+        )
+        .map_err(|e| format!("Failed running function '{}': {}", test_data.function_name, e))?;
+
+    match &result.value {
+        RunResultValue::Success(values) => {
+            if values != &test_data.expected_output {
+                return Err(format!(
+                    "Function '{}' output mismatch: expected {}, got {}",
+                    test_data.function_name,
+                    test_data.expected_output.iter().map(|f| f.to_string()).join(", "),
+                    values.iter().map(|f| f.to_string()).join(", ")
+                ));
+            }
+            Ok(())
+        }
+        RunResultValue::Panic(panic_data) => Err(format!(
+            "Function '{}' panicked with data: {panic_data:?}",
+            test_data.function_name
+        )),
+    }
+}
+
+/// Parses the `enforced_costs` test argument. It should consist of lines of the form
+///   <function_name> <cost>
+/// Where `function_name` is the fully-qualified name of the function, and `cost` is the cost to
+/// enforce for that function.
+fn parse_enforced_costs(
+    sierra_program: &Program,
+    enforced_costs_str: &str,
+) -> OrderedHashMap<FunctionId, CostTokenMap<i32>> {
+    // Create a map from function name to function id.
+    let function_name_to_id: UnorderedHashMap<&str, _> = sierra_program
+        .funcs
+        .iter()
+        .map(|Function { id, .. }| (id.debug_name.as_ref().unwrap().as_str(), id))
+        .collect();
+
+    enforced_costs_str
+        .split('\n')
+        .map(|line| {
+            // line is the name of the function and the enforced cost, separated by a space.
+            let [name, cost_str] = line.split(' ').collect_vec()[..] else {
+                panic!(
+                    "Invalid enforced cost line. Expected a line of the form '<function name> \
+                     <cost>'."
+                );
+            };
+
+            // Get the FunctionId from the name by searching program.funcs.
+            let function_id = *function_name_to_id
+                .get(name)
+                .unwrap_or_else(|| panic!("Function {name} was not found."));
+            let cost = cost_str
+                .parse::<i32>()
+                .unwrap_or_else(|_| panic!("Expected a number as the enforced cost."));
+            (function_id.clone(), [(CostTokenType::Const, cost)].into_iter().collect())
+        })
+        .collect::<OrderedHashMap<_, _>>()
 }

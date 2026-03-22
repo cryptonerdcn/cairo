@@ -1,15 +1,21 @@
-use cairo_lang_filesystem::db::FilesGroup;
-use cairo_lang_utils::Upcast;
+use cairo_lang_filesystem::ids::Tracked;
+use salsa::Database;
 
-use super::green::GreenNode;
-use super::ids::{GreenId, SyntaxStablePtrId};
-use super::stable_ptr::SyntaxStablePtr;
+use super::SyntaxNode;
 
-// Salsa database interface.
-#[salsa::query_group(SyntaxDatabase)]
-pub trait SyntaxGroup: FilesGroup + Upcast<dyn FilesGroup> {
-    #[salsa::interned]
-    fn intern_green(&self, field: GreenNode) -> GreenId;
-    #[salsa::interned]
-    fn intern_stable_ptr(&self, field: SyntaxStablePtr) -> SyntaxStablePtrId;
+pub trait SyntaxGroup: Database {
+    /// Query for caching [SyntaxNode::get_children].
+    fn get_children<'db>(&'db self, node: SyntaxNode<'db>) -> &'db [SyntaxNode<'db>] {
+        get_children(self.as_dyn_database(), (), node)
+    }
+}
+impl<T: Database + ?Sized> SyntaxGroup for T {}
+
+#[salsa::tracked(returns(ref))]
+fn get_children<'db>(
+    db: &'db dyn Database,
+    _tracked: Tracked,
+    node: SyntaxNode<'db>,
+) -> Vec<SyntaxNode<'db>> {
+    node.get_children_impl(db)
 }

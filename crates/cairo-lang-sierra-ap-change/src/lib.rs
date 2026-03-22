@@ -1,11 +1,10 @@
 //! Sierra AP change model.
 use ap_change_info::ApChangeInfo;
-use cairo_lang_sierra::extensions::core::{CoreLibfunc, CoreType};
 use cairo_lang_sierra::extensions::gas::CostTokenType;
 use cairo_lang_sierra::ids::{ConcreteTypeId, FunctionId};
 use cairo_lang_sierra::program::{Program, StatementIdx};
-use cairo_lang_sierra::program_registry::{ProgramRegistry, ProgramRegistryError};
-use cairo_lang_sierra_type_size::{get_type_size_map, TypeSizeMap};
+use cairo_lang_sierra::program_registry::ProgramRegistryError;
+use cairo_lang_sierra_type_size::{ProgramRegistryInfo, TypeSizeMap};
 use cairo_lang_utils::casts::IntoOrPanic;
 use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
 use core_libfunc_ap_change::InvocationApChangeInfoProvider;
@@ -14,6 +13,8 @@ use itertools::Itertools;
 use thiserror::Error;
 
 pub mod ap_change_info;
+/// Direct linear computation of AP-Changes instead of equation solver.
+pub mod compute;
 pub mod core_libfunc_ap_change;
 mod generate_equations;
 
@@ -44,8 +45,6 @@ pub enum ApChange {
 pub enum ApChangeError {
     #[error("error from the program registry")]
     ProgramRegistryError(#[from] Box<ProgramRegistryError>),
-    #[error("found an illegal statement index during ap change calculations")]
-    StatementOutOfBounds(StatementIdx),
     #[error("got a statement out of order during ap change calculations")]
     StatementOutOfOrder(StatementIdx),
     #[error("Wrong number of libfunc branches in ap-change information")]
@@ -66,8 +65,8 @@ struct InvocationApChangeInfoProviderForEqGen<'a, TokenUsages: Fn(CostTokenType)
     token_usages: TokenUsages,
 }
 
-impl<'a, TokenUsages: Fn(CostTokenType) -> usize> InvocationApChangeInfoProvider
-    for InvocationApChangeInfoProviderForEqGen<'a, TokenUsages>
+impl<TokenUsages: Fn(CostTokenType) -> usize> InvocationApChangeInfoProvider
+    for InvocationApChangeInfoProviderForEqGen<'_, TokenUsages>
 {
     fn type_size(&self, ty: &ConcreteTypeId) -> usize {
         self.type_sizes[ty].into_or_panic()
@@ -81,16 +80,15 @@ impl<'a, TokenUsages: Fn(CostTokenType) -> usize> InvocationApChangeInfoProvider
 /// Calculates gas information for a given program.
 pub fn calc_ap_changes<TokenUsages: Fn(StatementIdx, CostTokenType) -> usize>(
     program: &Program,
+    program_info: &ProgramRegistryInfo,
     token_usages: TokenUsages,
 ) -> Result<ApChangeInfo, ApChangeError> {
-    let registry = ProgramRegistry::<CoreType, CoreLibfunc>::new(program)?;
-    let type_sizes = get_type_size_map(program, &registry).unwrap();
     let equations = generate_equations::generate_equations(program, |idx, libfunc_id| {
-        let libfunc = registry.get_libfunc(libfunc_id)?;
+        let libfunc = program_info.registry.get_libfunc(libfunc_id)?;
         core_libfunc_ap_change::core_libfunc_ap_change(
             libfunc,
             &InvocationApChangeInfoProviderForEqGen {
-                type_sizes: &type_sizes,
+                type_sizes: &program_info.type_sizes,
                 token_usages: |token_type| token_usages(idx, token_type),
             },
         )

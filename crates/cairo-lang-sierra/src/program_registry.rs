@@ -1,8 +1,7 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
-use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
-use itertools::chain;
+use itertools::{chain, izip};
 use thiserror::Error;
 
 use crate::extensions::lib_func::{
@@ -11,11 +10,13 @@ use crate::extensions::lib_func::{
 use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::types::TypeInfo;
 use crate::extensions::{
-    ConcreteType, ExtensionError, GenericLibfunc, GenericLibfuncEx, GenericType, GenericTypeEx,
+    ConcreteLibfunc, ConcreteType, ExtensionError, GenericLibfunc, GenericLibfuncEx, GenericType,
+    GenericTypeEx,
 };
 use crate::ids::{ConcreteLibfuncId, ConcreteTypeId, FunctionId, GenericTypeId};
 use crate::program::{
-    DeclaredTypeInfo, Function, FunctionSignature, GenericArg, Program, TypeDeclaration,
+    BranchTarget, DeclaredTypeInfo, Function, FunctionSignature, GenericArg, Program, Statement,
+    StatementIdx, TypeDeclaration,
 };
 
 #[cfg(test)]
@@ -25,28 +26,50 @@ mod test;
 /// Errors encountered in the program registry.
 #[derive(Error, Debug, Eq, PartialEq)]
 pub enum ProgramRegistryError {
-    #[error("used the same function id twice")]
+    #[error("used the same function id twice `{0}`.")]
     FunctionIdAlreadyExists(FunctionId),
-    #[error("Could not find the requested function")]
+    #[error("Could not find the requested function `{0}`.")]
     MissingFunction(FunctionId),
-    #[error("Error during type specialization")]
+    #[error("Error during type specialization of `{concrete_id}`: {error}")]
     TypeSpecialization { concrete_id: ConcreteTypeId, error: ExtensionError },
-    #[error("Used the same concrete type id twice")]
+    #[error("Used concrete type id `{0}` twice")]
     TypeConcreteIdAlreadyExists(ConcreteTypeId),
-    #[error("Declared the same concrete type twice")]
+    #[error("Declared concrete type `{0}` twice")]
     TypeAlreadyDeclared(Box<TypeDeclaration>),
-    #[error("Could not find the requested type")]
+    #[error("Could not find requested type `{0}`.")]
     MissingType(ConcreteTypeId),
-    #[error("Error during libfunc specialization")]
+    #[error("Error during libfunc specialization of {concrete_id}: {error}")]
     LibfuncSpecialization { concrete_id: ConcreteLibfuncId, error: ExtensionError },
-    #[error("Used the same concrete libfunc id twice")]
+    #[error("Used concrete libfunc id `{0}` twice.")]
     LibfuncConcreteIdAlreadyExists(ConcreteLibfuncId),
-    #[error("Could not find the requested libfunc")]
+    #[error("Could not find requested libfunc `{0}`.")]
     MissingLibfunc(ConcreteLibfuncId),
-    #[error("Type info declaration mismatch")]
+    #[error("Type info declaration mismatch for `{0}`.")]
     TypeInfoDeclarationMismatch(ConcreteTypeId),
-    #[error("Function parameter type must be storable")]
+    #[error("Function `{func_id}`'s parameter type `{ty}` is not storable.")]
     FunctionWithUnstorableType { func_id: FunctionId, ty: ConcreteTypeId },
+    #[error("Function `{0}` points to non existing entry point statement.")]
+    FunctionNonExistingEntryPoint(FunctionId),
+    #[error("#{0}: Libfunc invocation input count mismatch")]
+    LibfuncInvocationInputCountMismatch(StatementIdx),
+    #[error("#{0}: Libfunc invocation branch count mismatch")]
+    LibfuncInvocationBranchCountMismatch(StatementIdx),
+    #[error("#{0}: Libfunc invocation branch #{1} result count mismatch")]
+    LibfuncInvocationBranchResultCountMismatch(StatementIdx, usize),
+    #[error("#{0}: Libfunc invocation branch #{1} target mismatch")]
+    LibfuncInvocationBranchTargetMismatch(StatementIdx, usize),
+    #[error("#{src}: Branch jump backwards to {dst}")]
+    BranchBackwards { src: StatementIdx, dst: StatementIdx },
+    #[error("#{src}: Branch jump to a non-branch align statement #{dst}")]
+    BranchNotToBranchAlign { src: StatementIdx, dst: StatementIdx },
+    #[error("#{src1}, #{src2}: Jump to the same statement #{dst}")]
+    MultipleJumpsToSameStatement { src1: StatementIdx, src2: StatementIdx, dst: StatementIdx },
+    #[error("#{0}: Jump out of range")]
+    JumpOutOfRange(StatementIdx),
+    #[error("Type size computation failed for `{ty}`: missing size information for `{dep}`")]
+    TypeSizeDependencyMissing { ty: ConcreteTypeId, dep: ConcreteTypeId },
+    #[error("Type size computation failed for `{0}`: size overflow.")]
+    TypeSizeOverflow(ConcreteTypeId),
 }
 
 type TypeMap<TType> = HashMap<ConcreteTypeId, TType>;
@@ -67,9 +90,8 @@ pub struct ProgramRegistry<TType: GenericType, TLibfunc: GenericLibfunc> {
 }
 impl<TType: GenericType, TLibfunc: GenericLibfunc> ProgramRegistry<TType, TLibfunc> {
     /// Create a registry for the program.
-    pub fn new_with_ap_change(
+    pub fn new(
         program: &Program,
-        function_ap_change: OrderedHashMap<FunctionId, usize>,
     ) -> Result<ProgramRegistry<TType, TLibfunc>, Box<ProgramRegistryError>> {
         let functions = get_functions(program)?;
         let (concrete_types, concrete_type_ids) = get_concrete_types_maps::<TType>(program)?;
@@ -79,19 +101,13 @@ impl<TType: GenericType, TLibfunc: GenericLibfunc> ProgramRegistry<TType, TLibfu
                 functions: &functions,
                 concrete_type_ids: &concrete_type_ids,
                 concrete_types: &concrete_types,
-                function_ap_change,
             },
         )?;
         let registry = ProgramRegistry { functions, concrete_types, concrete_libfuncs };
-        registry.validate()?;
+        registry.validate(program)?;
         Ok(registry)
     }
 
-    pub fn new(
-        program: &Program,
-    ) -> Result<ProgramRegistry<TType, TLibfunc>, Box<ProgramRegistryError>> {
-        Self::new_with_ap_change(program, Default::default())
-    }
     /// Gets a function from the input program.
     pub fn get_function<'a>(
         &'a self,
@@ -120,10 +136,11 @@ impl<TType: GenericType, TLibfunc: GenericLibfunc> ProgramRegistry<TType, TLibfu
             .ok_or_else(|| Box::new(ProgramRegistryError::MissingLibfunc(id.clone())))
     }
 
-    /// Checks the validity of the [ProgramRegistry].
+    /// Checks the validity of the [ProgramRegistry] and runs validations on the program.
     ///
-    /// Checks that all the parameter and return types are storable.
-    fn validate(&self) -> Result<(), Box<ProgramRegistryError>> {
+    /// Later compilation stages may perform more validations as well as repeat these validations.
+    fn validate(&self, program: &Program) -> Result<(), Box<ProgramRegistryError>> {
+        // Check that all the parameter and return types are storable.
         for func in self.functions.values() {
             for ty in chain!(func.signature.param_types.iter(), func.signature.ret_types.iter()) {
                 if !self.get_type(ty)?.info().storable {
@@ -131,6 +148,96 @@ impl<TType: GenericType, TLibfunc: GenericLibfunc> ProgramRegistry<TType, TLibfu
                         func_id: func.id.clone(),
                         ty: ty.clone(),
                     }));
+                }
+            }
+            if func.entry_point.0 >= program.statements.len() {
+                return Err(Box::new(ProgramRegistryError::FunctionNonExistingEntryPoint(
+                    func.id.clone(),
+                )));
+            }
+        }
+        // A branch map, mapping from a destination statement to the statement that jumps to it.
+        // A branch is considered a branch only if it has more than one target.
+        // Assuming branches into branch alignments only, this should be a bijection.
+        let mut branches: HashMap<StatementIdx, StatementIdx> =
+            HashMap::<StatementIdx, StatementIdx>::default();
+        for (i, statement) in program.statements.iter().enumerate() {
+            self.validate_statement(program, StatementIdx(i), statement, &mut branches)?;
+        }
+        Ok(())
+    }
+
+    /// Checks the validity of a statement.
+    fn validate_statement(
+        &self,
+        program: &Program,
+        index: StatementIdx,
+        statement: &Statement,
+        branches: &mut HashMap<StatementIdx, StatementIdx>,
+    ) -> Result<(), Box<ProgramRegistryError>> {
+        let Statement::Invocation(invocation) = statement else {
+            return Ok(());
+        };
+        let libfunc = self.get_libfunc(&invocation.libfunc_id)?;
+        if invocation.args.len() != libfunc.param_signatures().len() {
+            return Err(Box::new(ProgramRegistryError::LibfuncInvocationInputCountMismatch(index)));
+        }
+        let libfunc_branches = libfunc.branch_signatures();
+        if invocation.branches.len() != libfunc_branches.len() {
+            return Err(Box::new(ProgramRegistryError::LibfuncInvocationBranchCountMismatch(
+                index,
+            )));
+        }
+        let libfunc_fallthrough = libfunc.fallthrough();
+        for (branch_index, (invocation_branch, libfunc_branch)) in
+            izip!(&invocation.branches, libfunc_branches).enumerate()
+        {
+            if invocation_branch.results.len() != libfunc_branch.vars.len() {
+                return Err(Box::new(
+                    ProgramRegistryError::LibfuncInvocationBranchResultCountMismatch(
+                        index,
+                        branch_index,
+                    ),
+                ));
+            }
+            if matches!(libfunc_fallthrough, Some(target) if target == branch_index)
+                != (invocation_branch.target == BranchTarget::Fallthrough)
+            {
+                return Err(Box::new(ProgramRegistryError::LibfuncInvocationBranchTargetMismatch(
+                    index,
+                    branch_index,
+                )));
+            }
+            if !matches!(libfunc_branch.ap_change, SierraApChange::BranchAlign)
+                && let Some(prev) = branches.get(&index)
+            {
+                return Err(Box::new(ProgramRegistryError::BranchNotToBranchAlign {
+                    src: *prev,
+                    dst: index,
+                }));
+            }
+            let next = index.next(invocation_branch.target);
+            if next.0 >= program.statements.len() {
+                return Err(Box::new(ProgramRegistryError::JumpOutOfRange(index)));
+            }
+            if libfunc_branches.len() > 1 {
+                if next.0 < index.0 {
+                    return Err(Box::new(ProgramRegistryError::BranchBackwards {
+                        src: index,
+                        dst: next,
+                    }));
+                }
+                match branches.entry(next) {
+                    Entry::Occupied(e) => {
+                        return Err(Box::new(ProgramRegistryError::MultipleJumpsToSameStatement {
+                            src1: *e.get(),
+                            src2: index,
+                            dst: next,
+                        }));
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert(index);
+                    }
                 }
             }
         }
@@ -159,11 +266,8 @@ struct TypeSpecializationContextForRegistry<'a, TType: GenericType> {
 impl<TType: GenericType> TypeSpecializationContext
     for TypeSpecializationContextForRegistry<'_, TType>
 {
-    fn try_get_type_info(&self, id: ConcreteTypeId) -> Option<TypeInfo> {
-        self.declared_type_info
-            .get(&id)
-            .or_else(|| self.concrete_types.get(&id).map(|ty| ty.info()))
-            .cloned()
+    fn try_get_type_info(&self, id: &ConcreteTypeId) -> Option<&TypeInfo> {
+        self.declared_type_info.get(id).or_else(|| self.concrete_types.get(id).map(|ty| ty.info()))
     }
 }
 
@@ -209,12 +313,12 @@ fn get_concrete_types_maps<TType: GenericType>(
             })
         })?;
         // Check that the info is consistent with declaration.
-        if let Some(declared_info) = declared_type_info.get(&declaration.id) {
-            if concrete_type.info() != declared_info {
-                return Err(Box::new(ProgramRegistryError::TypeInfoDeclarationMismatch(
-                    declaration.id.clone(),
-                )));
-            }
+        if let Some(declared_info) = declared_type_info.get(&declaration.id)
+            && concrete_type.info() != declared_info
+        {
+            return Err(Box::new(ProgramRegistryError::TypeInfoDeclarationMismatch(
+                declaration.id.clone(),
+            )));
         }
 
         match concrete_types.entry(declaration.id.clone()) {
@@ -240,12 +344,10 @@ pub struct SpecializationContextForRegistry<'a, TType: GenericType> {
     pub functions: &'a FunctionMap,
     pub concrete_type_ids: &'a ConcreteTypeIdMap<'a>,
     pub concrete_types: &'a TypeMap<TType::Concrete>,
-    /// AP changes information for Sierra user functions.
-    pub function_ap_change: OrderedHashMap<FunctionId, usize>,
 }
 impl<TType: GenericType> TypeSpecializationContext for SpecializationContextForRegistry<'_, TType> {
-    fn try_get_type_info(&self, id: ConcreteTypeId) -> Option<TypeInfo> {
-        self.concrete_types.get(&id).map(|ty| ty.info().clone())
+    fn try_get_type_info(&self, id: &ConcreteTypeId) -> Option<&TypeInfo> {
+        self.concrete_types.get(id).map(|ty| ty.info())
     }
 }
 impl<TType: GenericType> SignatureSpecializationContext
@@ -262,26 +364,10 @@ impl<TType: GenericType> SignatureSpecializationContext
     fn try_get_function_signature(&self, function_id: &FunctionId) -> Option<FunctionSignature> {
         self.try_get_function(function_id).map(|f| f.signature)
     }
-
-    fn as_type_specialization_context(&self) -> &dyn TypeSpecializationContext {
-        self
-    }
-
-    fn try_get_function_ap_change(&self, function_id: &FunctionId) -> Option<SierraApChange> {
-        Some(if self.function_ap_change.contains_key(function_id) {
-            SierraApChange::Known { new_vars_only: false }
-        } else {
-            SierraApChange::Unknown
-        })
-    }
 }
 impl<TType: GenericType> SpecializationContext for SpecializationContextForRegistry<'_, TType> {
     fn try_get_function(&self, function_id: &FunctionId) -> Option<Function> {
         self.functions.get(function_id).cloned()
-    }
-
-    fn upcast(&self) -> &dyn SignatureSpecializationContext {
-        self
     }
 }
 

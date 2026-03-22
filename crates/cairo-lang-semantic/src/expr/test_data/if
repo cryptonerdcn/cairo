@@ -1,9 +1,9 @@
 //! > Incompatible types in if blocks.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
+//! > function_code
 fn foo() {
     let x = 7_felt252;
     if x {
@@ -16,48 +16,191 @@ fn foo() {
 //! > function_name
 foo
 
-//! > module_code
-
 //! > expected_diagnostics
-error: If condition has type "core::felt252", expected bool.
+error[E2055]: Condition has type "core::felt252", expected bool.
  --> lib.cairo:3:8
     if x {
        ^
 
-error: Unexpected return type. Expected: "()", found: "core::bool".
- --> lib.cairo:1:10
-fn foo() {
-         ^
-
-error: Trait has no implementation in context: core::integer::NumericLiteral::<core::bool>
- --> lib.cairo:6:9
-        0
-        ^
+error[E2042]: Unexpected return type. Expected: "()", found: "core::bool".
+ --> lib.cairo:1:10-8:1
+  fn foo() {
+ __________^
+| ...
+| }
+|_^
 
 //! > ==========================================================================
 
 //! > Single sided if.
 
 //! > test_runner_name
-test_function_diagnostics
+test_function_diagnostics(expect_diagnostics: true)
 
-//! > function
+//! > function_code
 fn foo() -> bool {
     let x = 7_u64;
     if x {
         return true;
-    } else {
-    }
+    } else {}
     false
 }
 
 //! > function_name
 foo
 
-//! > module_code
-
 //! > expected_diagnostics
-error: If condition has type "core::integer::u64", expected bool.
+error[E2055]: Condition has type "core::integer::u64", expected bool.
  --> lib.cairo:3:8
     if x {
        ^
+
+//! > ==========================================================================
+
+//! > if_let.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() -> bool {
+    let x = Some(7_u64);
+    if let MyEnum::A(y) = x {
+        return y == 9;
+    } else {
+        return false;
+    }
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum MyEnum {
+    A: felt252,
+}
+
+//! > expected_diagnostics
+error[E2109]: Wrong enum in pattern. Expected: "Option". Got: "MyEnum".
+ --> lib.cairo:6:12
+    if let MyEnum::A(y) = x {
+           ^^^^^^^^^^^^
+
+error[E0006]: Identifier not found.
+ --> lib.cairo:7:16
+        return y == 9;
+               ^
+
+//! > ==========================================================================
+
+//! > if_let logical operators.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() -> bool {
+    let x = Some(7_u64);
+    if let Some(y) = x || true {
+        return y == 9;
+    } else {
+        return false;
+    }
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E1030]: Operator '||' is not allowed in let chains. Consider wrapping the expression in parentheses.
+ --> lib.cairo:3:24
+    if let Some(y) = x || true {
+                       ^
+
+//! > ==========================================================================
+
+//! > if_let some no args.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo() -> bool {
+    let x = Some(7_u64);
+    if let Some = x {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+warning[E2192]: Pattern missing subpattern for the payload of variant. Consider using `Some(_)`
+ --> lib.cairo:3:12
+    if let Some = x {
+           ^^^^
+
+//! > ==========================================================================
+
+//! > if_let enum unit no args.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: false)
+
+//! > function_code
+fn foo() -> bool {
+    let a = A::B(());
+    if let A::B = a {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+//! > function_name
+foo
+
+//! > module_code
+enum A {
+    B: (),
+}
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > if_let with multiple conditions.
+
+//! > test_runner_name
+test_function_diagnostics(expect_diagnostics: true)
+
+//! > function_code
+fn foo(a: Option<Option<Option<felt252>>>) {
+    if let Some(b) = a && let Some(_c) = b {}
+    // The opposite order doesn't work.
+    if let Some(_c) = b && let Some(b) = a {}
+    // Test with the same variable name. The later conditions can use the previous pattern
+    // variables.
+    if let Some(a) = a && let Some(a) = a && let Some(a) = a {
+        a
+    } else {
+        1
+    };
+}
+
+//! > function_name
+foo
+
+//! > expected_diagnostics
+error[E0006]: Identifier not found.
+ --> lib.cairo:4:23
+    if let Some(_c) = b && let Some(b) = a {}
+                      ^
+
+warning[E0001]: Unused variable. Consider ignoring by prefixing with `_`.
+ --> lib.cairo:4:37
+    if let Some(_c) = b && let Some(b) = a {}
+                                    ^

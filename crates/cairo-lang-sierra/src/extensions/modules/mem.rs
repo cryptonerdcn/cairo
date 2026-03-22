@@ -7,8 +7,8 @@ use crate::extensions::lib_func::{
     WrapSignatureAndTypeGenericLibfunc,
 };
 use crate::extensions::{
-    args_as_single_type, NamedType, NoGenericArgsGenericLibfunc, OutputVarReferenceInfo,
-    SpecializationError,
+    NamedType, NoGenericArgsGenericLibfunc, OutputVarReferenceInfo, SpecializationError,
+    args_as_single_type,
 };
 use crate::ids::ConcreteTypeId;
 use crate::program::GenericArg;
@@ -34,7 +34,8 @@ impl SignatureAndTypeGenericLibfunc for StoreTempLibfuncWrapped {
         context: &dyn SignatureSpecializationContext,
         ty: ConcreteTypeId,
     ) -> Result<LibfuncSignature, SpecializationError> {
-        if !context.as_type_specialization_context().get_type_info(ty.clone())?.storable {
+        let type_info = context.get_type_info(&ty)?;
+        if !type_info.storable {
             return Err(SpecializationError::UnsupportedGenericArg);
         }
         Ok(LibfuncSignature::new_non_branch_ex(
@@ -44,7 +45,14 @@ impl SignatureAndTypeGenericLibfunc for StoreTempLibfuncWrapped {
                 allow_add_const: true,
                 allow_const: true,
             }],
-            vec![OutputVarInfo { ty, ref_info: OutputVarReferenceInfo::NewTempVar { idx: 0 } }],
+            vec![OutputVarInfo {
+                ty,
+                ref_info: if type_info.zero_sized {
+                    OutputVarReferenceInfo::ZeroSized
+                } else {
+                    OutputVarReferenceInfo::NewTempVar { idx: 0 }
+                },
+            }],
             SierraApChange::Known { new_vars_only: true },
         ))
     }
@@ -64,7 +72,8 @@ impl SignatureAndTypeGenericLibfunc for StoreLocalLibfuncWrapped {
     ) -> Result<LibfuncSignature, SpecializationError> {
         let uninitialized_type =
             context.get_wrapped_concrete_type(UninitializedType::id(), ty.clone())?;
-        if !context.as_type_specialization_context().get_type_info(ty.clone())?.storable {
+        let type_info = context.get_type_info(&ty)?;
+        if !type_info.storable {
             return Err(SpecializationError::UnsupportedGenericArg);
         }
         Ok(LibfuncSignature::new_non_branch_ex(
@@ -77,7 +86,14 @@ impl SignatureAndTypeGenericLibfunc for StoreLocalLibfuncWrapped {
                     allow_const: true,
                 },
             ],
-            vec![OutputVarInfo { ty, ref_info: OutputVarReferenceInfo::NewLocalVar }],
+            vec![OutputVarInfo {
+                ty,
+                ref_info: if type_info.zero_sized {
+                    OutputVarReferenceInfo::ZeroSized
+                } else {
+                    OutputVarReferenceInfo::NewLocalVar
+                },
+            }],
             SierraApChange::Known { new_vars_only: true },
         ))
     }
@@ -113,11 +129,16 @@ impl SignatureAndTypeGenericLibfunc for AllocLocalLibfuncWrapped {
         context: &dyn SignatureSpecializationContext,
         ty: ConcreteTypeId,
     ) -> Result<LibfuncSignature, SpecializationError> {
+        let type_info = context.get_type_info(&ty)?;
         Ok(LibfuncSignature::new_non_branch(
             vec![],
             vec![OutputVarInfo {
                 ty: context.get_wrapped_concrete_type(UninitializedType::id(), ty)?,
-                ref_info: OutputVarReferenceInfo::NewLocalVar,
+                ref_info: if type_info.zero_sized {
+                    OutputVarReferenceInfo::ZeroSized
+                } else {
+                    OutputVarReferenceInfo::NewLocalVar
+                },
             }],
             SierraApChange::Known { new_vars_only: true },
         ))
@@ -137,6 +158,6 @@ impl SignatureOnlyGenericLibfunc for RenameLibfunc {
         args: &[GenericArg],
     ) -> Result<LibfuncSignature, SpecializationError> {
         let ty = args_as_single_type(args)?;
-        Ok(reinterpret_cast_signature(ty.clone(), ty))
+        Ok(reinterpret_cast_signature(ty.clone(), ty.clone()))
     }
 }

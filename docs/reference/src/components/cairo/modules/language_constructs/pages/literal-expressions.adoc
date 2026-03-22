@@ -10,7 +10,7 @@ The supported literal expressions are described next.
 The two values of the xref:boolean-types.adoc[boolean] type are `true` and `false`.
 
 example
-[source]
+[source,cairo]
 ----
 let a = true;
 let b = false;
@@ -20,8 +20,8 @@ let b = false;
 
 Cairo supports the following numeric literals:
 1. A decimal literal that consists of only decimal digits.
-2. A hexadecimal literal that start with the character sequence `0x` and continues with hex digits.
-3. A binary literal that start with the character sequence `0b` and continues with binary digits.
+2. A hexadecimal literal that starts with the character sequence `0x` and continues with hex digits.
+3. A binary literal that starts with the character sequence `0b` and continues with binary digits.
 
 
 A numeric literal may be followed (immediately, without any spaces) by an underscore character (`_`)
@@ -39,9 +39,9 @@ Examples of numeric literals of various forms:
 |===
 | Literal         | Value | Type
 | `1234`          | 1234  | `felt252`
-| `1234_felt252   | 1234  | `felt252`
-| `1234_u32       | 1234  | `i32`
-| `1234_u128      | 1234  | `u128`
+| `1234_felt252`   | 1234  | `felt252`
+| `1234_u32`       | 1234  | `u32`
+| `1234_u128`      | 1234  | `u128`
 | `0x4D2`         | 1234  | `felt252`
 | `0b10011010010` | 1234  | `felt252`
 |===
@@ -62,7 +62,7 @@ Cairo syntax considers `-1` as an application of the xref:negation-operators.ado
 
 == Short string literals
 
-A short string is a ascii-string whose length is limited by the type that holds it.
+A short string is an ASCII string whose length is limited by the type that holds it.
 The default type is a `felt252` which limits the length of the string to 31 characters.
 A short string literal may be followed by an underscore character (`_`)
 and then a __literal suffix__ just like a numerical literal.
@@ -78,3 +78,14 @@ Cairo doesn't have a string type at the moment.
 
 The short string's first character is the most significant byte of the integer (big endian
 representation).
+
+== String literals
+
+A string literal is a sequence of characters enclosed in double quotes ("...").
+String literals support escape sequences (for example, for newlines or quotes) and are
+limited to ASCII characters.
+
+Unlike short string literals, string literals do not have a numeric representation and
+cannot be suffixed with a type like `_u8` or `_felt252`.
+They are primarily used in language features and tooling that consume string values,
+while the core language still does not define a built-in `string` type.

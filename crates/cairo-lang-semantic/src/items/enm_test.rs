@@ -1,17 +1,19 @@
 use cairo_lang_debug::DebugWithDb;
 use cairo_lang_defs::ids::ModuleItemId;
+use cairo_lang_filesystem::ids::SmolStrId;
+use cairo_lang_test_utils::test;
 use cairo_lang_utils::extract_matches;
 use indoc::indoc;
 use pretty_assertions::assert_eq;
-use test_log::test;
 
-use crate::db::SemanticGroup;
-use crate::test_utils::{setup_test_module, SemanticDatabaseForTesting};
+use crate::items::enm::EnumSemantic;
+use crate::items::module::ModuleSemantic;
+use crate::test_utils::{SemanticDatabaseForTesting, setup_test_module};
 
 #[test]
 fn test_enum() {
-    let mut db_val = SemanticDatabaseForTesting::default();
-    let db = &mut db_val;
+    let db_val = SemanticDatabaseForTesting::default();
+    let db = &db_val;
     let (test_module, diagnostics) = setup_test_module(
         db,
         indoc::indoc! {"
@@ -32,22 +34,22 @@ fn test_enum() {
     assert_eq!(
         diagnostics,
         indoc! {r#"
-        error: Redefinition of variant "a" on enum "test::A".
+        error[E2051]: Redefinition of variant "a" on enum "A".
          --> lib.cairo:5:5
             a: (),
-            ^***^
+            ^^^^^
 
-        error: Redefinition of variant "a" on enum "test::A".
+        error[E2051]: Redefinition of variant "a" on enum "A".
          --> lib.cairo:6:5
             a: ()
-            ^***^
+            ^^^^^
 
         "#}
     );
     let module_id = test_module.module_id;
 
     let enum_id = extract_matches!(
-        db.module_item_by_name(module_id, "A".into()).unwrap().unwrap(),
+        db.module_item_by_name(module_id, SmolStrId::from(db, "A")).unwrap().unwrap(),
         ModuleItemId::Enum
     );
     let actual = db
@@ -56,7 +58,8 @@ fn test_enum() {
         .iter()
         .map(|(name, variant_id)| {
             format!(
-                "{name}: {:?}, ty: {:?}",
+                "{}: {:?}, ty: {:?}",
+                name.long(db),
                 variant_id.debug(db),
                 db.variant_semantic(enum_id, *variant_id).unwrap().ty.debug(db)
             )
@@ -66,8 +69,8 @@ fn test_enum() {
     assert_eq!(
         actual,
         indoc! {"
-            a: VariantId(test::a), ty: (),
-            b: VariantId(test::b), ty: (core::felt252, core::felt252),
-            c: VariantId(test::c), ty: ()"}
+            a: VariantId(test::A::a), ty: (),
+            b: VariantId(test::A::b), ty: (core::felt252, core::felt252),
+            c: VariantId(test::A::c), ty: ()"}
     );
 }

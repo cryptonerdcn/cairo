@@ -1,7 +1,8 @@
+use crate::extensions::SpecializationError;
+use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::types::{
     GenericTypeArgGenericType, GenericTypeArgGenericTypeWrapper, TypeInfo,
 };
-use crate::extensions::SpecializationError;
 use crate::ids::GenericTypeId;
 
 /// Type representing a span.
@@ -12,11 +13,18 @@ impl GenericTypeArgGenericType for SpanTypeWrapped {
 
     fn calc_info(
         &self,
+        _context: &dyn TypeSpecializationContext,
         long_id: crate::program::ConcreteTypeLongId,
-        TypeInfo { storable, duplicatable, droppable, zero_sized, .. }: TypeInfo,
+        wrapped_info: &TypeInfo,
     ) -> Result<TypeInfo, SpecializationError> {
-        if storable && !zero_sized {
-            Ok(TypeInfo { long_id, duplicatable, droppable, storable: true, zero_sized: false })
+        if wrapped_info.storable && !wrapped_info.zero_sized {
+            Ok(TypeInfo {
+                long_id,
+                duplicatable: wrapped_info.duplicatable,
+                droppable: wrapped_info.droppable,
+                storable: true,
+                zero_sized: false,
+            })
         } else {
             Err(SpecializationError::UnsupportedGenericArg)
         }

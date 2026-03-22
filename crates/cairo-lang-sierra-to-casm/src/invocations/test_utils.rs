@@ -14,11 +14,12 @@ use cairo_lang_sierra::program::{BranchInfo, BranchTarget, Invocation, Statement
 use cairo_lang_sierra_ap_change::ap_change_info::ApChangeInfo;
 use cairo_lang_sierra_gas::gas_info::GasInfo;
 use cairo_lang_sierra_type_size::TypeSizeMap;
-use itertools::{zip_eq, Itertools};
+use cairo_lang_utils::unordered_hash_map::UnorderedHashMap;
+use itertools::{Itertools, zip_eq};
 
-use super::{compile_invocation, CompiledInvocation, ProgramInfo};
-use crate::environment::gas_wallet::GasWallet;
+use super::{CompiledInvocation, ProgramInfo, compile_invocation};
 use crate::environment::Environment;
+use crate::environment::gas_wallet::GasWallet;
 use crate::metadata::Metadata;
 use crate::references::{IntroductionPoint, ReferenceExpression, ReferenceValue};
 use crate::relocations::RelocationEntry;
@@ -46,7 +47,7 @@ macro_rules! ref_expr_extend {
     ($cells:ident) => {};
     ($cells:ident, [$a:ident $($op:tt $offset:expr)?] $(, $tok:tt)*) => {
         $cells.push(
-            cairo_lang_casm::cell_expression::CellExpression::Deref(cairo_lang_casm::deref!([$a $($op $offset)?]))
+            cairo_lang_casm::cell_expression::CellExpression::Deref(cairo_lang_casm::cell_ref!([$a $($op $offset)?]))
         );
         $crate::ref_expr_extend!($cells $(, $tok)*)
     };
@@ -54,20 +55,20 @@ macro_rules! ref_expr_extend {
         $cells.push(
             cairo_lang_casm::cell_expression::CellExpression::BinOp {
                 op: $crate::cell_expr_operator!($operator),
-                a: cairo_lang_casm::deref!([$a $($op $offset)?]),
+                a: cairo_lang_casm::cell_ref!([$a $($op $offset)?]),
                 b: cairo_lang_casm::deref_or_immediate!($b),
         });
         $crate::ref_expr_extend!($cells $(, $tok)*)
     };
     ($cells:ident, [[$a:ident $($op:tt $offset:expr)?]] $(, $tok:tt)*) => {
         $cells.push(
-            cairo_lang_casm::cell_expression::CellExpression::DoubleDeref(cairo_lang_casm::deref!([$a $($op $offset)?]), 0)
+            cairo_lang_casm::cell_expression::CellExpression::DoubleDeref(cairo_lang_casm::cell_ref!([$a $($op $offset)?]), 0)
         );
         $crate::ref_expr_extend!($cells $(, $tok)*)
     };
     ($cells:ident, [[$a:ident $($op:tt $offset:expr)?] + $offset2:expr] $(, $tok:tt)*) => {
         $cells.push(
-            cairo_lang_casm::cell_expression::CellExpression::DoubleDeref(cairo_lang_casm::deref!([$a $($op $offset)?]), $offset2)
+            cairo_lang_casm::cell_expression::CellExpression::DoubleDeref(cairo_lang_casm::cell_ref!([$a $($op $offset)?]), $offset2)
         );
         $crate::ref_expr_extend!($cells $(, $tok)*)
     };
@@ -101,18 +102,12 @@ macro_rules! ref_expr {
 
 /// Specialization context for libfuncs and types, based on string names only, allows building
 /// libfuncs without salsa db or program registry.
-struct MockSpecializationContext {}
+struct MockSpecializationContext {
+    type_infos: UnorderedHashMap<ConcreteTypeId, TypeInfo>,
+}
 impl TypeSpecializationContext for MockSpecializationContext {
-    fn try_get_type_info(&self, id: ConcreteTypeId) -> Option<TypeInfo> {
-        let long_id = cairo_lang_sierra::ConcreteTypeLongIdParser::new()
-            .parse(id.to_string().as_str())
-            .unwrap();
-        Some(
-            CoreType::specialize_by_id(self, &long_id.generic_id, &long_id.generic_args)
-                .ok()?
-                .info()
-                .clone(),
-        )
+    fn try_get_type_info(&self, id: &ConcreteTypeId) -> Option<&TypeInfo> {
+        self.type_infos.get(id)
     }
 }
 impl SignatureSpecializationContext for MockSpecializationContext {
@@ -122,7 +117,7 @@ impl SignatureSpecializationContext for MockSpecializationContext {
         generic_args: &[cairo_lang_sierra::program::GenericArg],
     ) -> Option<ConcreteTypeId> {
         Some(if generic_args.is_empty() {
-            id.to_string().into()
+            id.0.into()
         } else {
             format!(
                 "{id}<{}>",
@@ -141,23 +136,8 @@ impl SignatureSpecializationContext for MockSpecializationContext {
     ) -> Option<cairo_lang_sierra::program::FunctionSignature> {
         unreachable!("Function related specialization functionalities are not implemented.")
     }
-
-    fn try_get_function_ap_change(
-        &self,
-        _function_id: &cairo_lang_sierra::ids::FunctionId,
-    ) -> Option<cairo_lang_sierra::extensions::lib_func::SierraApChange> {
-        unreachable!("Function related specialization functionalities are not implemented.")
-    }
-
-    fn as_type_specialization_context(&self) -> &dyn TypeSpecializationContext {
-        self
-    }
 }
 impl SpecializationContext for MockSpecializationContext {
-    fn upcast(&self) -> &dyn SignatureSpecializationContext {
-        self
-    }
-
     fn try_get_function(
         &self,
         _function_id: &cairo_lang_sierra::ids::FunctionId,
@@ -231,10 +211,18 @@ impl std::fmt::Debug for ReducedCompiledInvocation {
 ///
 /// Currently, only works if all the libfunc's types (both inputs and output) are of size 1.
 pub fn compile_libfunc(libfunc: &str, refs: Vec<ReferenceExpression>) -> ReducedCompiledInvocation {
-    let long_id = cairo_lang_sierra::ConcreteLibfuncLongIdParser::new()
-        .parse(libfunc.to_string().as_str())
-        .unwrap();
-    let context = MockSpecializationContext {};
+    let long_id = cairo_lang_sierra::ConcreteLibfuncLongIdParser::new().parse(libfunc).unwrap();
+    let mut context = MockSpecializationContext { type_infos: Default::default() };
+    {
+        let name = "felt252";
+        let id: ConcreteTypeId = name.into();
+        let long_id = cairo_lang_sierra::ConcreteTypeLongIdParser::new().parse(name).unwrap();
+        let info = CoreType::specialize_by_id(&context, &long_id.generic_id, &long_id.generic_args)
+            .unwrap()
+            .info()
+            .clone();
+        context.type_infos.insert(id, info);
+    }
     let libfunc =
         CoreLibfunc::specialize_by_id(&context, &long_id.generic_id, &long_id.generic_args)
             .unwrap();
@@ -259,10 +247,12 @@ pub fn compile_libfunc(libfunc: &str, refs: Vec<ReferenceExpression>) -> Reduced
                 function_costs: Default::default(),
             },
         },
+        circuits_info: &Default::default(),
         type_sizes: &type_sizes,
+        const_data_values: &|_| panic!("const_data_values not implemented for tests."),
     };
 
-    let args: Vec<ReferenceValue> = zip_eq(refs.into_iter(), libfunc.param_signatures())
+    let args: Vec<ReferenceValue> = zip_eq(refs, libfunc.param_signatures())
         .map(|(expression, param)| ReferenceValue {
             expression,
             ty: param.ty.clone(),
@@ -275,7 +265,7 @@ pub fn compile_libfunc(libfunc: &str, refs: Vec<ReferenceExpression>) -> Reduced
         })
         .collect();
 
-    let environment = Environment::new(GasWallet::Disabled);
+    let environment: Environment = Environment::new(GasWallet::Disabled);
     ReducedCompiledInvocation::new(
         compile_invocation(
             program_info,

@@ -1,10 +1,7 @@
 //! > Test function with return type.
 
-//! > test_comments
-// TODO(spapini): Remove duplicated diagnostics.
-
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 1 + foo()
@@ -15,81 +12,63 @@ test_expr_diagnostics
 //! > function_body
 
 //! > expected_diagnostics
-error: Skipped tokens. Expected: Const/Module/Use/FreeFunction/ExternFunction/ExternType/Trait/Impl/Struct/Enum/TypeAlias or an attribute.
+error[E1000]: Skipped tokens. Expected: Const/Enum/ExternFunction/ExternType/Function/Impl/InlineMacro/Module/Struct/Trait/TypeAlias/Use or an attribute.
  --> lib.cairo:1:1
 3 + 4 +;
-^
+^^^^^^^^
 
-error: Skipped tokens. Expected: Const/Module/Use/FreeFunction/ExternFunction/ExternType/Trait/Impl/Struct/Enum/TypeAlias or an attribute.
- --> lib.cairo:1:3
-3 + 4 +;
-  ^
-
-error: Skipped tokens. Expected: Const/Module/Use/FreeFunction/ExternFunction/ExternType/Trait/Impl/Struct/Enum/TypeAlias or an attribute.
- --> lib.cairo:1:5
-3 + 4 +;
-    ^
-
-error: Skipped tokens. Expected: Const/Module/Use/FreeFunction/ExternFunction/ExternType/Trait/Impl/Struct/Enum/TypeAlias or an attribute.
- --> lib.cairo:1:7
-3 + 4 +;
-      ^
-
-error: Skipped tokens. Expected: Const/Module/Use/FreeFunction/ExternFunction/ExternType/Trait/Impl/Struct/Enum/TypeAlias or an attribute.
- --> lib.cairo:1:8
-3 + 4 +;
-       ^
-
-error: Function not found.
+error[E0006]: Function not found.
  --> lib.cairo:3:5
 1 + foo()
-    ^*^
+    ^^^
 
 //! > ==========================================================================
 
 //! > Test function lookup
 
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 {
   foo();
   core::felt252_add(1,1);
-  test::foo();
+  submod::foo();
   bad_module::foo();
   super::foo();
   test::super::foo();
 }
 
 //! > module_code
-fn foo() {
+fn foo() {}
+mod submod {
+    fn foo() {}
 }
 
 //! > function_body
 
 //! > expected_diagnostics
-error: Identifier not found.
- --> lib.cairo:8:3
+error[E0006]: Identifier not found.
+ --> lib.cairo:10:3
   bad_module::foo();
-  ^********^
+  ^^^^^^^^^^
 
-error: 'super' cannot be used for the crate's root module.
- --> lib.cairo:9:3
+error[E2097]: 'super' cannot be used for the crate's root module.
+ --> lib.cairo:11:3
   super::foo();
-  ^***^
+  ^^^^^
 
-error: Invalid path.
- --> lib.cairo:10:9
+error[E0006]: Identifier not found.
+ --> lib.cairo:12:3
   test::super::foo();
-        ^***^
+  ^^^^
 
 //! > ==========================================================================
 
 //! > Test duplicate 'ref'.
 
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 {
@@ -97,24 +76,24 @@ test_expr_diagnostics
 
 //! > module_code
 fn foo(ref ref v: felt252) {
-  let mut a = 1;
-  foo(ref a);
+    let mut a = 1;
+    foo(ref a);
 }
 
 //! > function_body
 
 //! > expected_diagnostics
-error: `ref` modifier was specified after another modifier (`ref`). Only a single modifier is allowed.
+error[E2101]: `ref` modifier was specified after another modifier (`ref`). Only a single modifier is allowed.
  --> lib.cairo:1:12
 fn foo(ref ref v: felt252) {
-           ^*^
+           ^^^
 
 //! > ==========================================================================
 
 //! > Test bad argument for ref param (not a variable).
 
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 {
@@ -122,23 +101,23 @@ test_expr_diagnostics
 
 //! > module_code
 fn foo(ref v: felt252) {
-  foo(1);
+    foo(1);
 }
 
 //! > function_body
 
 //! > expected_diagnostics
-error: ref argument must be a variable.
- --> lib.cairo:2:7
-  foo(1);
-      ^
+error[E2079]: ref argument must be a variable.
+ --> lib.cairo:2:9
+    foo(1);
+        ^
 
 //! > ==========================================================================
 
 //! > Test bad argument for ref param (variable not mutable).
 
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 {
@@ -146,82 +125,91 @@ test_expr_diagnostics
 
 //! > module_code
 fn foo(ref v: felt252) {
-  let a = 3;
-  foo(ref a);
+    let a = 3;
+    foo(ref a);
 }
 
 //! > function_body
 
 //! > expected_diagnostics
-error: ref argument must be a mutable variable.
- --> lib.cairo:3:11
-  foo(ref a);
-          ^
+error[E2080]: ref argument must be a mutable variable.
+ --> lib.cairo:3:13
+    foo(ref a);
+            ^
 
 //! > ==========================================================================
 
 //! > Test numerical literal of unsupported type.
 
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 {
-    let a = 123_felt252;
-    let a = 123_u128;
-    let b = 123_NonZero;
-    let b = 123_u129;
+    let _a = 123_felt252;
+    let _a = 123_u128;
+    let _b = 123_bool;
+    let _b = 123_NonZero;
+    let _b = 123_u129;
 }
 
 //! > module_code
-fn foo() {
-}
+fn foo() {}
 
 //! > function_body
 
 //! > expected_diagnostics
-error: Unknown type.
- --> lib.cairo:8:13
-    let b = 123_u129;
-            ^******^
+error[E2008]: A numeric literal of type core::bool cannot be created.
+ --> lib.cairo:6:14
+    let _b = 123_bool;
+             ^^^^^^^^
 
-error: Trait has no implementation in context: core::integer::NumericLiteral::<core::zeroable::NonZero>
- --> lib.cairo:7:13
-    let b = 123_NonZero;
-            ^*********^
+error[E2030]: Wrong number of arguments. Expected 1, found: 0
+ --> lib.cairo:7:14
+    let _b = 123_NonZero;
+             ^^^^^^^^^^^
+
+error[E2006]: Unknown type.
+ --> lib.cairo:8:14
+    let _b = 123_u129;
+             ^^^^^^^^
 
 //! > ==========================================================================
 
 //! > Test use cycle
 
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 {
 }
 
 //! > module_code
-mod A {
-  use super::B;
+mod a {
+    use super::B;
 }
-
-use A::B;
+use a::B;
 
 //! > function_body
 
 //! > expected_diagnostics
-error: Cycle detected while resolving 'use' items.
- --> lib.cairo:5:8
-use A::B;
+error[E2025]: Cycle detected while resolving 'use' items.
+ --> lib.cairo:4:8
+use a::B;
        ^
+
+error[E2025]: Cycle detected while resolving 'use' items.
+ --> lib.cairo:2:16
+    use super::B;
+               ^
 
 //! > ==========================================================================
 
 //! > Test bad use
 
 //! > test_runner_name
-test_expr_diagnostics
+test_expr_diagnostics(expect_diagnostics: true)
 
 //! > expr_code
 {
@@ -233,7 +221,1399 @@ use bad_module_name;
 //! > function_body
 
 //! > expected_diagnostics
-error: Identifier not found.
+error[E0006]: Identifier not found.
  --> lib.cairo:1:5
 use bad_module_name;
-    ^*************^
+    ^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test diagnostic after skipped attribute
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+  let _x = y;
+}
+
+//! > module_code
+mod mod1 {
+  #[aaa]
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E1023]: Missing tokens. Expected an item after attributes.
+ --> lib.cairo:2:9
+  #[aaa]
+        ^
+
+error[E0006]: Identifier not found.
+ --> lib.cairo:6:12
+  let _x = y;
+           ^
+
+//! > ==========================================================================
+
+//! > Test unused variable.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+  let x = 7;
+  let x = 3;
+  let y = 5;
+  x
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E0001]: Unused variable. Consider ignoring by prefixing with `_`.
+ --> lib.cairo:3:7
+  let x = 7;
+      ^
+
+warning[E0001]: Unused variable. Consider ignoring by prefixing with `_`.
+ --> lib.cairo:5:7
+  let y = 5;
+      ^
+
+//! > ==========================================================================
+
+//! > Test unused variable not reported.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+  let x = 1;
+  let y = 2;
+  let z = 3;
+  func_call(x);
+  z.member_call(y);
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E0006]: Function not found.
+ --> lib.cairo:6:3
+  func_call(x);
+  ^^^^^^^^^
+
+error[E0002]: Method `member_call` not found on type `?2`. Did you import the correct trait and impl?
+ --> lib.cairo:7:5
+  z.member_call(y);
+    ^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test unhandled Option.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  Option::<felt252>::None;
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2064]: Unhandled `#[must_use]` type `core::option::Option::<core::felt252>`
+ --> lib.cairo:3:3
+  Option::<felt252>::None;
+  ^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test unhandled Result.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  Result::<felt252, felt252>::Err(4);
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2064]: Unhandled `#[must_use]` type `core::result::Result::<core::felt252, core::felt252>`
+ --> lib.cairo:3:3
+  Result::<felt252, felt252>::Err(4);
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test unhandled must use function.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  must_use_function();
+}
+
+//! > module_code
+#[must_use]
+fn must_use_function() -> felt252 {
+    0
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2069]: Unhandled `#[must_use]` function.
+ --> lib.cairo:7:3
+  must_use_function();
+  ^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test unhandled must use impl function.
+
+//! > TODO(gil): fix and change `expect_diagnostics` to true.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: *)
+
+//! > expr_code
+{
+  imp::must_use_function();
+}
+
+//! > module_code
+trait trt {
+    fn must_use_function() -> felt252;
+}
+impl imp of trt {
+    #[must_use]
+    fn must_use_function() -> felt252 {
+        0
+    }
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Test unhandled must use trait function.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  trt::must_use_function();
+}
+
+//! > module_code
+trait trt {
+    #[must_use]
+    fn must_use_function() -> felt252;
+}
+impl imp of trt {
+    fn must_use_function() -> felt252 {
+        0
+    }
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2069]: Unhandled `#[must_use]` function.
+ --> lib.cairo:12:3
+  trt::must_use_function();
+  ^^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test unhandled must use method.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  let x: felt252 = 1;
+  x.must_use_function();
+}
+
+//! > module_code
+trait trt<T> {
+    #[must_use]
+    fn must_use_function(self: T) -> felt252;
+}
+impl imp of trt<felt252> {
+    fn must_use_function(self: felt252) -> felt252 {
+        0
+    }
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2069]: Unhandled `#[must_use]` function.
+ --> lib.cairo:13:3
+  x.must_use_function();
+  ^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test tail expression is considered a use of a must use function.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: false)
+
+//! > expr_code
+{
+  must_use_function()
+}
+
+//! > module_code
+#[must_use]
+fn must_use_function() -> felt252 {
+    0
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+
+//! > ==========================================================================
+
+//! > Test usage of unstable.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  let _fail = unstable_function();
+  #[feature("testing")]
+  let _work = unstable_function();
+  let _fail = unstable_function_with_note();
+  #[feature("testing")]
+  let _work = unstable_function_with_note();
+}
+
+//! > module_code
+#[unstable(feature: "testing")]
+fn unstable_function() -> felt252 {
+    0
+}
+
+#[unstable(feature: "testing", note: "Some reason", since: "1.0.0")]
+fn unstable_function_with_note() -> felt252 {
+    0
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2065]: Usage of unstable feature `"testing"` with no `#[feature("testing")]` attribute.
+ --> lib.cairo:12:15
+  let _fail = unstable_function();
+              ^^^^^^^^^^^^^^^^^
+
+warning[E2065]: Usage of unstable feature `"testing"` with no `#[feature("testing")]` attribute. Note: "Some reason"
+ --> lib.cairo:15:15
+  let _fail = unstable_function_with_note();
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test usage of deprecated.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  let _fail = deprecated_function_with_note();
+  #[feature("deprecated")]
+  let _work = deprecated_function_with_note();
+  let _fail = deprecated_function_no_note();
+  #[feature("deprecated")]
+  let _work = deprecated_function_no_note();
+  #[allow(deprecated)]
+  let _work = deprecated_function_no_note();
+}
+
+//! > module_code
+#[deprecated(feature: "deprecated", note: "Some reason", since: "1.0.0")]
+fn deprecated_function_with_note() -> felt252 {
+    0
+}
+
+#[deprecated(feature: "deprecated")]
+fn deprecated_function_no_note() -> felt252 {
+    0
+}
+
+#[unstable(feature: "unstable-trait")]
+trait UnstableTrait;
+
+impl BadUnstableImpl of UnstableTrait;
+
+#[feature("unstable-trait")]
+impl AllowedUnstableImpl of UnstableTrait;
+
+#[unstable(feature: "unstable-member")]
+struct DisallowedType {}
+
+struct BadStructMember {
+    member: DisallowedType,
+}
+
+#[feature("unstable-member")]
+struct AllowedStructMember {
+    member: DisallowedType,
+}
+
+enum BadEnumVariant {
+    variant: DisallowedType,
+}
+
+#[feature("unstable-member")]
+enum AllowedEnumMember {
+    variant: DisallowedType,
+}
+
+trait ATrait {}
+
+impl BadATraitImpl<+UnstableTrait> of ATrait;
+
+#[feature("unstable-trait")]
+impl ATraitImpl<+UnstableTrait> of ATrait;
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2065]: Usage of unstable feature `"unstable-trait"` with no `#[feature("unstable-trait")]` attribute.
+ --> lib.cairo:14:25
+impl BadUnstableImpl of UnstableTrait;
+                        ^^^^^^^^^^^^^
+
+warning[E2065]: Usage of unstable feature `"unstable-member"` with no `#[feature("unstable-member")]` attribute.
+ --> lib.cairo:23:13
+    member: DisallowedType,
+            ^^^^^^^^^^^^^^
+
+warning[E2065]: Usage of unstable feature `"unstable-member"` with no `#[feature("unstable-member")]` attribute.
+ --> lib.cairo:32:14
+    variant: DisallowedType,
+             ^^^^^^^^^^^^^^
+
+warning[E2065]: Usage of unstable feature `"unstable-trait"` with no `#[feature("unstable-trait")]` attribute.
+ --> lib.cairo:42:21
+impl BadATraitImpl<+UnstableTrait> of ATrait;
+                    ^^^^^^^^^^^^^
+
+warning[E2066]: Usage of deprecated feature `"deprecated"` with no `#[feature("deprecated")]` attribute. Note: "Some reason"
+ --> lib.cairo:48:15
+  let _fail = deprecated_function_with_note();
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[E2066]: Usage of deprecated feature `"deprecated"` with no `#[feature("deprecated")]` attribute.
+ --> lib.cairo:51:15
+  let _fail = deprecated_function_no_note();
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test usage of internal.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+  let _fail = internal_function_with_note();
+  #[feature("internal")]
+  let _work = internal_function_with_note();
+  let _fail = internal_function_no_note();
+  #[feature("internal")]
+  let _work = internal_function_no_note();
+}
+
+//! > module_code
+#[internal(feature: "internal", note: "Some reason", since: "1.0.0")]
+fn internal_function_with_note() -> felt252 {
+    0
+}
+
+#[internal(feature: "internal")]
+fn internal_function_no_note() -> felt252 {
+    0
+}
+
+#[internal(feature: "internal-trait")]
+trait InternalTrait;
+
+impl BadInternalImpl of InternalTrait;
+
+#[feature("internal-trait")]
+impl AllowedInternalImpl of InternalTrait;
+
+#[internal(feature: "internal-member")]
+struct DisallowedType {}
+
+struct BadStructMember {
+    member: DisallowedType,
+}
+
+#[feature("internal-member")]
+struct AllowedStructMember {
+    member: DisallowedType,
+}
+
+enum BadEnumVariant {
+    variant: DisallowedType,
+}
+
+#[feature("internal-member")]
+enum AllowedEnumMember {
+    variant: DisallowedType,
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E2067]: Usage of internal feature `"internal-trait"` with no `#[feature("internal-trait")]` attribute.
+ --> lib.cairo:14:25
+impl BadInternalImpl of InternalTrait;
+                        ^^^^^^^^^^^^^
+
+error[E2067]: Usage of internal feature `"internal-member"` with no `#[feature("internal-member")]` attribute.
+ --> lib.cairo:23:13
+    member: DisallowedType,
+            ^^^^^^^^^^^^^^
+
+error[E2067]: Usage of internal feature `"internal-member"` with no `#[feature("internal-member")]` attribute.
+ --> lib.cairo:32:14
+    variant: DisallowedType,
+             ^^^^^^^^^^^^^^
+
+error[E2067]: Usage of internal feature `"internal"` with no `#[feature("internal")]` attribute. Note: "Some reason"
+ --> lib.cairo:41:15
+  let _fail = internal_function_with_note();
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E2067]: Usage of internal feature `"internal"` with no `#[feature("internal")]` attribute.
+ --> lib.cairo:44:15
+  let _fail = internal_function_no_note();
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test bad feature marker declarations.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{}
+
+//! > module_code
+#[unstable]
+fn unstable_missing_feature() {}
+
+#[unstable(feature: "testing", extra)]
+fn unstable_extra_unnamed() {}
+
+#[unstable(feature: "testing", note: "extra")]
+fn unstable_extra_named() {}
+
+#[unstable(feature: "testing", feature: "other")]
+fn unstable_repeated_feature() {}
+
+#[deprecated]
+fn deprecated_missing_feature() {}
+
+#[deprecated(feature: "testing", extra)]
+fn deprecated_extra_unnamed() {}
+
+#[deprecated(feature: "testing", extra: "extra")]
+fn deprecated_extra_named() {}
+
+#[deprecated(feature: "testing", feature: "other")]
+fn deprecated_repeated_feature() {}
+
+#[deprecated(feature: "testing", , note: "extra1", note: "extra2")]
+fn deprecated_repeated_notes() {}
+
+#[unstable(feature: "testing1")]
+#[unstable(feature: "testing2")]
+fn multiple_unstable_feature_markers() {}
+
+#[deprecated(feature: "testing1")]
+#[unstable(feature: "testing2")]
+fn multiple_mixed_feature_markers() {}
+
+
+#[deprecated(feature: "testing1")]
+#[internal(feature: "testing2")]
+fn multiple_mixed_feature_markers2() {}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E1000]: Skipped tokens. Expected: argument.
+ --> lib.cairo:25:34
+#[deprecated(feature: "testing", , note: "extra1", note: "extra2")]
+                                 ^
+
+error[E2068]: Missing `feature` arg for feature marker attribute.
+ --> lib.cairo:1:1
+#[unstable]
+^^^^^^^^^^^
+
+error[E2068]: Unsupported argument for feature marker attribute.
+ --> lib.cairo:4:32
+#[unstable(feature: "testing", extra)]
+                               ^^^^^
+
+error[E2068]: Duplicated argument for feature marker attribute.
+ --> lib.cairo:10:32
+#[unstable(feature: "testing", feature: "other")]
+                               ^^^^^^^
+
+error[E2068]: Missing `feature` arg for feature marker attribute.
+ --> lib.cairo:13:1
+#[deprecated]
+^^^^^^^^^^^^^
+
+error[E2068]: Unsupported argument for feature marker attribute.
+ --> lib.cairo:16:34
+#[deprecated(feature: "testing", extra)]
+                                 ^^^^^
+
+error[E2068]: Unsupported argument for feature marker attribute.
+ --> lib.cairo:19:34
+#[deprecated(feature: "testing", extra: "extra")]
+                                 ^^^^^
+
+error[E2068]: Duplicated argument for feature marker attribute.
+ --> lib.cairo:22:34
+#[deprecated(feature: "testing", feature: "other")]
+                                 ^^^^^^^
+
+error[E2068]: Duplicated argument for feature marker attribute.
+ --> lib.cairo:25:52
+#[deprecated(feature: "testing", , note: "extra1", note: "extra2")]
+                                                   ^^^^
+
+error[E2068]: Multiple feature marker attributes.
+ --> lib.cairo:28:1-29:32
+  #[unstable(feature: "testing1")]
+ _^
+| #[unstable(feature: "testing2")]
+|________________________________^
+
+error[E2068]: Multiple feature marker attributes.
+ --> lib.cairo:32:1-33:32
+  #[deprecated(feature: "testing1")]
+ _^
+| #[unstable(feature: "testing2")]
+|________________________________^
+
+error[E2068]: Multiple feature marker attributes.
+ --> lib.cairo:37:1-38:32
+  #[deprecated(feature: "testing1")]
+ _^
+| #[internal(feature: "testing2")]
+|________________________________^
+
+//! > ==========================================================================
+
+//! > Test bad type usage.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+  let _fail = array![()];
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E2053]: Cannot have array of type "()" that is zero sized.
+ --> lib.cairo:3:15
+  let _fail = array![()];
+              ^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test missing '::' in path.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+  let _fail = bar<felt252>(1);
+}
+
+//! > module_code
+fn bar<T>(_a: T) {}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E1028]: Consecutive comparison operators are not allowed: '<' followed by '>'
+ --> lib.cairo:4:26
+  let _fail = bar<felt252>(1);
+                         ^
+
+error[E2005]: Expected variable or constant, found function.
+ --> lib.cairo:4:15
+  let _fail = bar<felt252>(1);
+              ^^^
+
+error[E2183]: Are you missing a `::`?.
+ --> lib.cairo:4:18
+  let _fail = bar<felt252>(1);
+                 ^
+
+//! > ==========================================================================
+
+//! > Testing use star not on a module
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+const NOT_MODULE: u8 = 2;
+pub mod a {
+    use super::NOT_MODULE::*;
+}
+
+//! > function_body
+
+//! > expr_code
+{}
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2005]: Expected module, found constant.
+ --> lib.cairo:3:16
+    use super::NOT_MODULE::*;
+               ^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Testing use star with non-existent path.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    use super::b::c::*;
+}
+
+//! > function_body
+
+//! > expr_code
+{}
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E0006]: Identifier not found.
+ --> lib.cairo:2:16
+    use super::b::c::*;
+               ^
+
+//! > ==========================================================================
+
+//! > Testing use star ambiguous path
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+pub mod a {
+    pub const AMBIGUOUS: u8 = 1;
+}
+
+pub mod b {
+    pub const AMBIGUOUS: u8 = 4;
+}
+use a::*;
+use b::*;
+
+//! > function_body
+
+//! > expr_code
+AMBIGUOUS
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2087]: Ambiguous path. Multiple matching items: `test::a::AMBIGUOUS`, `test::b::AMBIGUOUS`
+ --> lib.cairo:11:1
+AMBIGUOUS
+^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Testing use star path does not exist
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+use undefined_item::*;
+
+//! > function_body
+
+//! > expr_code
+{}
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E0006]: Identifier not found.
+ --> lib.cairo:1:5
+use undefined_item::*;
+    ^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Testing use star unresolved import due to cycle
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    use a::a::a::a::*;
+    use super::*;
+}
+
+//! > function_body
+
+//! > expr_code
+{}
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2120]: cannot glob-import a module into itself
+ --> lib.cairo:2:21
+    use a::a::a::a::*;
+                    ^
+
+//! > ==========================================================================
+
+//! > Testing use star empty path
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+use *;
+
+//! > function_body
+
+//! > expr_code
+{}
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2090]: `*` in `use` items is not allowed for empty path.
+ --> lib.cairo:1:5
+use *;
+    ^
+
+//! > ==========================================================================
+
+//! > Testing use star inaccessible item
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    const INACCESSIBLE: u8 = 1;
+}
+use a::*;
+
+//! > function_body
+
+//! > expr_code
+INACCESSIBLE
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2099]: Item `test::a::INACCESSIBLE` is not visible in this context through module `test::a`.
+ --> lib.cairo:6:1
+INACCESSIBLE
+^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Testing use star inaccessible module
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    mod inaccessible {
+        pub const C: u8 = 1;
+    }
+}
+use a::*;
+
+//! > function_body
+
+//! > expr_code
+inaccessible::C
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2099]: Item `test::a::inaccessible` is not visible in this context through module `test::a`.
+ --> lib.cairo:8:1
+inaccessible::C
+^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Testing use star imported inaccessible module
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    mod b {
+        pub const C: u8 = 1;
+    }
+}
+
+mod c {
+    pub mod d {
+        use super::super::a::b::*;
+    }
+}
+use c::d::*;
+
+//! > function_body
+
+//! > expr_code
+C
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2099]: Item `test::a::b::C` is not visible in this context through module `test::a::b`.
+ --> lib.cairo:14:1
+C
+^
+
+error[E2099]: Item `test::a::b` is not visible in this context.
+ --> lib.cairo:9:30
+        use super::super::a::b::*;
+                             ^
+
+//! > ==========================================================================
+
+//! > Testing use star imported inaccessible item
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    pub mod b {
+        const C: u8 = 1;
+    }
+}
+
+mod c {
+    pub mod d {
+        pub use super::super::a::b::*;
+    }
+}
+use c::d::*;
+
+//! > function_body
+
+//! > expr_code
+C
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2099]: Item `test::a::b::C` is not visible in this context through module `test::a::b`.
+ --> lib.cairo:14:1
+C
+^
+
+//! > ==========================================================================
+
+//! > Testing use star imported inaccessible middle global use
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    pub mod b {
+        pub const C: u8 = 1;
+    }
+}
+
+mod c {
+    pub mod d {
+        use super::super::a::b::*;
+    }
+}
+
+mod e {
+    pub mod f {
+        pub use super::super::c::d::*;
+    }
+}
+use e::f::*;
+
+//! > function_body
+
+//! > expr_code
+C
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2099]: Item `test::a::b::C` is not visible in this context through module `test::a::b`.
+ --> lib.cairo:20:1
+C
+^
+
+//! > ==========================================================================
+
+//! > Testing use star imported inaccessible end module
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2024_07"
+
+//! > module_code
+mod a {
+    mod b {
+        pub const C: u8 = 1;
+    }
+}
+
+mod c {
+    pub mod d {
+        pub use super::super::a::b::*;
+    }
+}
+
+mod e {
+    pub mod f {
+        pub use super::super::c::d::*;
+    }
+}
+use e::f::*;
+
+//! > function_body
+
+//! > expr_code
+C
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2099]: Item `test::a::b` is not visible in this context.
+ --> lib.cairo:9:34
+        pub use super::super::a::b::*;
+                                 ^
+
+//! > ==========================================================================
+
+//! > Testing use star not supported in edition
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > crate_settings
+edition = "2023_01"
+
+//! > module_code
+mod a {
+    pub const C: u8 = 1;
+}
+use a::*;
+
+//! > function_body
+
+//! > expr_code
+{}
+
+//! > expected_semantics
+
+//! > expected_diagnostics
+error[E2091]: Global `use` item is not supported in `V2023_01` edition.
+ --> lib.cairo:4:8
+use a::*;
+       ^
+
+//! > ==========================================================================
+
+//! > Test usage of deprecated trait function via function path.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  let x = Struct {};
+  MyTrait::deprecated_method(@x);
+}
+
+//! > module_code
+pub struct Struct {}
+
+pub trait MyTrait {
+    #[deprecated(feature: "deprecated", note: "This method is deprecated", since: "1.0.0")]
+    fn deprecated_method(self: @Struct);
+}
+
+impl MyTraitImpl of MyTrait {
+    fn deprecated_method(self: @Struct) {}
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2066]: Usage of deprecated feature `"deprecated"` with no `#[feature("deprecated")]` attribute. Note: "This method is deprecated"
+ --> lib.cairo:14:12
+  MyTrait::deprecated_method(@x);
+           ^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test usage of deprecated trait function via method.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+  let x = Struct {};
+  x.deprecated_method();
+}
+
+//! > module_code
+pub struct Struct {}
+
+pub trait MyTrait {
+    #[deprecated(feature: "deprecated", note: "This method is deprecated", since: "1.0.0")]
+    fn deprecated_method(self: @Struct);
+}
+
+impl MyTraitImpl of MyTrait {
+    fn deprecated_method(self: @Struct) {}
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2066]: Usage of deprecated feature `"deprecated"` with no `#[feature("deprecated")]` attribute. Note: "This method is deprecated"
+ --> lib.cairo:14:5
+  x.deprecated_method();
+    ^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test usage of deprecated impl function via the trait path prefix.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+    let s = Struct {};
+    MyTraitImpl::deprecated_method(@s);
+}
+
+//! > module_code
+pub struct Struct {}
+pub trait MyTrait {
+    #[deprecated(feature: "deprecated", note: "This method is deprecated", since: "1.0.0")]
+    fn deprecated_method(self: @Struct);
+}
+
+impl MyTraitImpl of MyTrait {
+    fn deprecated_method(self: @Struct) {}
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2066]: Usage of deprecated feature `"deprecated"` with no `#[feature("deprecated")]` attribute. Note: "This method is deprecated"
+ --> lib.cairo:13:18
+    MyTraitImpl::deprecated_method(@s);
+                 ^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test usage of deprecated impl function via the impl path prefix.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: warnings_only)
+
+//! > expr_code
+{
+    let s = Struct {};
+    MyTraitImpl::deprecated_method(@s);
+}
+
+//! > module_code
+pub struct Struct {}
+pub trait MyTrait {
+    fn deprecated_method(self: @Struct);
+}
+
+impl MyTraitImpl of MyTrait {
+    #[deprecated(feature: "deprecated", note: "This method is deprecated", since: "1.0.0")]
+    fn deprecated_method(self: @Struct) {}
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+warning[E2066]: Usage of deprecated feature `"deprecated"` with no `#[feature("deprecated")]` attribute. Note: "This method is deprecated"
+ --> lib.cairo:13:18
+    MyTraitImpl::deprecated_method(@s);
+                 ^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test implementation of dict value outside of the corelib.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+}
+
+//! > module_code
+struct S {}
+
+impl SDictValue of Felt252DictValue<S> {
+    fn zero_default() -> S nopanic {
+        S {}
+    }
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E2181]: Trait `core::traits::Felt252DictValue` should not be implemented outside of the corelib.
+ --> lib.cairo:3:20
+impl SDictValue of Felt252DictValue<S> {
+                   ^^^^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test implementation of numeric and string literal traits outside of the corelib.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+}
+
+//! > module_code
+struct S {}
+
+impl SNumericLiteral of NumericLiteral<S> {}
+
+impl SStringLiteral of StringLiteral<S> {}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E2181]: Trait `core::integer::NumericLiteral` should not be implemented outside of the corelib.
+ --> lib.cairo:3:25
+impl SNumericLiteral of NumericLiteral<S> {}
+                        ^^^^^^^^^^^^^^^^^
+
+error[E2181]: Trait `core::string::StringLiteral` should not be implemented outside of the corelib.
+ --> lib.cairo:5:24
+impl SStringLiteral of StringLiteral<S> {}
+                       ^^^^^^^^^^^^^^^^
+
+//! > ==========================================================================
+
+//! > Test wrong argument type in struct literal.
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{
+    S { a: @1 }
+}
+
+//! > module_code
+struct S {
+    a: u8,
+}
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E2041]: Unexpected argument type. Expected: "core::integer::u8", found: "@?0".
+It is possible that the type inference failed because the types differ in the number of snapshots.
+Consider adding or removing snapshots.
+ --> lib.cairo:6:12
+    S { a: @1 }
+           ^^
+
+//! > ==========================================================================
+
+//! > `path` attribute diagnostics
+
+//! > test_runner_name
+test_expr_diagnostics(expect_diagnostics: true)
+
+//! > expr_code
+{}
+
+//! > module_code
+#[path("a.cairo")]
+fn f() {}
+
+#[path("a.cairo")]
+mod inline {}
+
+#[path]
+mod m1;
+
+#[path("a.cairo", "b.cairo")]
+mod m2;
+
+#[path(3)]
+mod m3;
+
+#[path("non_existent_path.cairo")]
+mod non_existing;
+
+//! > function_body
+
+//! > expected_diagnostics
+error[E2200]: Plugin diagnostic: `#[path(..)]` is only allowed on module declarations.
+ --> lib.cairo:1:1
+#[path("a.cairo")]
+^^^^^^^^^^^^^^^^^^
+
+error[E2200]: Plugin diagnostic: `#[path(..)]` requires a file-based module: use `mod name;` with a semicolon.
+ --> lib.cairo:4:1
+#[path("a.cairo")]
+^^^^^^^^^^^^^^^^^^
+
+error[E2200]: Plugin diagnostic: `#[path(..)]` expects exactly one string literal argument.
+ --> lib.cairo:7:7
+#[path]
+      ^
+
+error[E2200]: Plugin diagnostic: `#[path(..)]` expects exactly one string literal argument.
+ --> lib.cairo:10:7
+#[path("a.cairo", "b.cairo")]
+      ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E2200]: Plugin diagnostic: `#[path(..)]` expects exactly one string literal argument.
+ --> lib.cairo:13:7
+#[path(3)]
+      ^^^
+
+error[E0005]: Module file not found. Expected path: m1.cairo
+ --> lib.cairo:7:1-8:7
+  #[path]
+ _^
+| mod m1;
+|_______^
+
+error[E0005]: Module file not found. Expected path: m2.cairo
+ --> lib.cairo:10:1-11:7
+  #[path("a.cairo", "b.cairo")]
+ _^
+| mod m2;
+|_______^
+
+error[E0005]: Module file not found. Expected path: m3.cairo
+ --> lib.cairo:13:1-14:7
+  #[path(3)]
+ _^
+| mod m3;
+|_______^
+
+error[E0005]: Module file not found. Expected path: non_existent_path.cairo
+ --> lib.cairo:16:1-17:17
+  #[path("non_existent_path.cairo")]
+ _^
+| mod non_existing;
+|_________________^

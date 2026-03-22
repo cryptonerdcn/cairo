@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,9 +6,12 @@ use cairo_lang_formatter::{CairoFormatter, FormatOutcome, FormatterConfig, Stdin
 use cairo_lang_utils::logging::init_logging;
 use clap::Parser;
 use colored::Colorize;
-use ignore::WalkState::Continue;
 use ignore::{DirEntry, Error, ParallelVisitor, ParallelVisitorBuilder, WalkState};
 use log::warn;
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// Outputs a string to stderr if the verbose flag is true.
 fn eprintln_if_verbose(s: &str, verbose: bool) {
@@ -18,10 +20,10 @@ fn eprintln_if_verbose(s: &str, verbose: bool) {
     }
 }
 
-/// Sierra to casm compiler.
-/// Exits with 0/1 if the compilation fails.
+/// Formats a file or directory with the Cairo formatter.
+/// Exits with 0/1 if the input is formatted correctly/incorrectly.
 #[derive(Parser, Debug)]
-#[clap(version, verbatim_doc_comment)]
+#[command(version, verbatim_doc_comment)]
 struct FormatterArgs {
     /// Check mode, don't write the formatted files,
     /// just output the diff between the original and the formatted file.
@@ -36,13 +38,35 @@ struct FormatterArgs {
     /// Print parsing errors.
     #[arg(short, long, default_value_t = false)]
     print_parsing_errors: bool,
+    /// Enable sorting the module level items (imports, mod definitions...).
+    #[arg(short, long)]
+    sort_mod_level_items: Option<bool>,
+    /// Controls tuple breaking behavior. Set to 'line-by-line' (default) to format each
+    /// tuple item on a new line, or 'single-break-point' to keep as many items as possible on the
+    /// same line (as space permits). Defaults to line-by-line.
+    #[arg(long)]
+    tuple_line_breaking: Option<bool>,
+    /// Controls fixed array breaking behavior. Set to 'single-break-point' (default) to format
+    /// each array item on a new line, or 'line-by-line' to keep as many items as possible on the
+    /// same line (as space permits). Defaults to single line.
+    #[arg(long)]
+    fixed_array_line_breaking: Option<bool>,
+    /// Controls macro call breaking behavior.
+    #[arg(long)]
+    macro_call_breaking_behavior: Option<bool>,
+    /// Enable merging of `use` items.
+    #[arg(long)]
+    merge_use_items: Option<bool>,
+    /// Enable duplicates in `use` items.
+    #[arg(long)]
+    allow_duplicates: Option<bool>,
     /// A list of files and directories to format. Use "-" for stdin.
     files: Vec<String>,
 }
 
-fn print_error(error: anyhow::Error, path: String, args: &FormatterArgs) {
+fn print_error(error: String, path: String, args: &FormatterArgs) {
     let parsed_errors = if args.print_parsing_errors {
-        format!("{error}").red()
+        error.red()
     } else {
         "Run with '--print-parsing-errors' to see error details.".red()
     };
@@ -84,7 +108,7 @@ fn check_file_formatting(fmt: &CairoFormatter, args: &FormatterArgs, path: &Path
             false
         }
         Err(parsing_error) => {
-            print_error(parsing_error, path.display().to_string(), args);
+            print_error(parsing_error.to_string(), path.display().to_string(), args);
             false
         }
     }
@@ -92,31 +116,31 @@ fn check_file_formatting(fmt: &CairoFormatter, args: &FormatterArgs, path: &Path
 
 fn format_file_in_place(fmt: &CairoFormatter, args: &FormatterArgs, path: &Path) -> bool {
     if let Err(parsing_error) = fmt.format_in_place(&path) {
-        print_error(parsing_error, path.display().to_string(), args);
+        print_error(parsing_error.to_string(), path.display().to_string(), args);
         false
     } else {
         true
     }
 }
 
-impl<'t> ParallelVisitor for PathFormatter<'t> {
+impl ParallelVisitor for PathFormatter<'_> {
     fn visit(&mut self, dir_entry_res: Result<DirEntry, Error>) -> WalkState {
         let dir_entry = if let Ok(dir_entry) = dir_entry_res {
             dir_entry
         } else {
             warn!("Failed to read the file.");
-            return Continue;
+            return WalkState::Continue;
         };
 
         let file_type = if let Some(file_type) = dir_entry.file_type() {
             file_type
         } else {
             warn!("Failed to read filetype.");
-            return Continue;
+            return WalkState::Continue;
         };
 
         if !file_type.is_file() {
-            return Continue;
+            return WalkState::Continue;
         }
 
         let file_path = dir_entry.path();
@@ -134,7 +158,7 @@ impl<'t> ParallelVisitor for PathFormatter<'t> {
         if !success {
             self.all_correct.store(false, Ordering::Release);
         }
-        Continue
+        WalkState::Continue
     }
 }
 
@@ -169,18 +193,24 @@ fn format_stdin(args: &FormatterArgs, fmt: &CairoFormatter) -> bool {
             }
         }
         Err(parsing_error) => {
-            print_error(parsing_error, String::from("standard input"), args);
+            print_error(parsing_error.to_string(), String::from("standard input"), args);
             false
         }
     }
 }
 
 fn main() -> ExitCode {
-    init_logging(log::LevelFilter::Off);
+    init_logging(tracing::Level::ERROR);
     log::info!("Starting formatting.");
 
     let args = FormatterArgs::parse();
-    let config = FormatterConfig::default();
+    let config = FormatterConfig::default()
+        .sort_module_level_items(args.sort_mod_level_items)
+        .tuple_breaking_behavior(args.tuple_line_breaking.map(Into::into))
+        .fixed_array_breaking_behavior(args.fixed_array_line_breaking.map(Into::into))
+        .macro_call_breaking_behavior(args.macro_call_breaking_behavior.map(Into::into))
+        .merge_use_items(args.merge_use_items)
+        .allow_duplicate_uses(args.allow_duplicates);
     let fmt = CairoFormatter::new(config);
 
     eprintln_if_verbose(
@@ -198,5 +228,5 @@ fn main() -> ExitCode {
         // Input comes from walk of listed locations
         args.files.iter().all(|file| format_path(file, &args, &fmt))
     };
-    if !all_correct && args.check { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+    if all_correct { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }

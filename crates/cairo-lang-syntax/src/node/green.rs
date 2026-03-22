@@ -1,30 +1,32 @@
+use cairo_lang_filesystem::ids::SmolStrId;
 use cairo_lang_filesystem::span::TextWidth;
-use smol_str::SmolStr;
+use cairo_lang_proc_macros::HeapSize;
+use salsa::Database;
 
 use super::ids::GreenId;
 use super::kind::SyntaxKind;
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub enum GreenNodeDetails {
-    Token(SmolStr),
-    Node { children: Vec<GreenId>, width: TextWidth },
+#[derive(Clone, Debug, Hash, PartialEq, Eq, salsa::Update, HeapSize)]
+pub enum GreenNodeDetails<'a> {
+    Token(SmolStrId<'a>),
+    Node { children: Vec<GreenId<'a>>, width: TextWidth },
 }
 /// Green node. Underlying untyped representation of the syntax tree.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct GreenNode {
+#[derive(Clone, Debug, Hash, PartialEq, Eq, salsa::Update, HeapSize)]
+pub struct GreenNode<'a> {
     pub kind: SyntaxKind,
-    pub details: GreenNodeDetails,
+    pub details: GreenNodeDetails<'a>,
 }
-impl GreenNode {
-    pub fn width(&self) -> TextWidth {
+impl<'a> GreenNode<'a> {
+    pub fn width(&self, db: &'a dyn Database) -> TextWidth {
         match &self.details {
-            GreenNodeDetails::Token(text) => TextWidth::from_str(text),
+            GreenNodeDetails::Token(text) => TextWidth::from_str(text.long(db)),
             GreenNodeDetails::Node { width, .. } => *width,
         }
     }
-    pub fn children(self) -> Vec<GreenId> {
-        match self.details {
-            GreenNodeDetails::Token(_text) => Vec::new(),
+    pub fn children(&self) -> &[GreenId<'a>] {
+        match &self.details {
+            GreenNodeDetails::Token(_text) => &[],
             GreenNodeDetails::Node { children, .. } => children,
         }
     }

@@ -1,10 +1,12 @@
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 use core::hash::Hash;
 
 /// A trait for a node in a graph. Note that a GraphNode has to be able to provide its neighbors
 /// by itself, without additional information.
 pub trait GraphNode: Sized + Clone {
     /// The type used to identify the nodes in the graph.
-    type NodeId: PartialEq + Eq + Hash + Clone;
+    type NodeId: Eq + Hash + Clone;
 
     /// Returns a list of the node's neighbors.
     /// Must be stable for the SCC result to be stable. i.e. if the output for a node here doesn't

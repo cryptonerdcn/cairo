@@ -7,15 +7,16 @@ use crate::extensions::lib_func::{
 };
 use crate::extensions::{
     NamedLibfunc, OutputVarReferenceInfo, SignatureBasedConcreteLibfunc, SpecializationError,
+    args_as_single_value,
 };
 use crate::ids::GenericTypeId;
 use crate::program::GenericArg;
 
 /// Trait for implementing a library function that returns a const of a given type.
 pub trait ConstGenLibfunc: Default {
-    /// The library function id.
+    /// The library function ID.
     const STR_ID: &'static str;
-    /// The id of the generic type to implement the library functions for.
+    /// The ID of the generic type to implement the library function for.
     const GENERIC_TYPE_ID: GenericTypeId;
     /// The bound on the value of the type.
     fn bound() -> BigInt;
@@ -49,21 +50,14 @@ impl<T: ConstGenLibfunc> NamedLibfunc for WrapConstGenLibfunc<T> {
         context: &dyn SpecializationContext,
         args: &[GenericArg],
     ) -> Result<Self::Concrete, SpecializationError> {
-        match args {
-            [GenericArg::Value(c)]
-                if !c.is_negative() && *c < (<T as ConstGenLibfunc>::bound()) =>
-            {
-                Ok(SignatureAndConstConcreteLibfunc {
-                    c: c.clone(),
-                    signature: <Self as NamedLibfunc>::specialize_signature(
-                        self,
-                        context.upcast(),
-                        args,
-                    )?,
-                })
-            }
-            _ => Err(SpecializationError::UnsupportedGenericArg),
+        let c = args_as_single_value(args)?;
+        if c.is_negative() || *c > (<T as ConstGenLibfunc>::bound()) {
+            return Err(SpecializationError::UnsupportedGenericArg);
         }
+        Ok(SignatureAndConstConcreteLibfunc {
+            c: c.clone(),
+            signature: <Self as NamedLibfunc>::specialize_signature(self, context, args)?,
+        })
     }
 }
 

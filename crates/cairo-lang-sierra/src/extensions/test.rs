@@ -1,14 +1,15 @@
 use bimap::BiMap;
+use cairo_lang_utils::unordered_hash_map::UnorderedHashMap;
 use num_bigint::BigInt;
 use test_case::test_case;
 
-use super::core::{CoreLibfunc, CoreType};
-use super::lib_func::{SierraApChange, SignatureSpecializationContext, SpecializationContext};
-use super::types::TypeInfo;
 use super::SpecializationError::{
     self, IndexOutOfRange, MissingFunction, UnsupportedGenericArg, UnsupportedId,
     WrongNumberOfGenericArgs,
 };
+use super::core::{CoreLibfunc, CoreType};
+use super::lib_func::{SignatureSpecializationContext, SpecializationContext};
+use super::types::TypeInfo;
 use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::{GenericLibfunc, GenericType};
 use crate::ids::{ConcreteTypeId, FunctionId, GenericTypeId};
@@ -29,73 +30,106 @@ fn value_arg(v: i64) -> GenericArg {
 
 struct MockSpecializationContext {
     mapping: BiMap<ConcreteTypeId, ConcreteTypeLongId>,
+    type_infos: UnorderedHashMap<ConcreteTypeId, TypeInfo>,
 }
 impl MockSpecializationContext {
     pub fn new() -> Self {
-        Self { mapping: build_bijective_mapping() }
+        let mapping = build_bijective_mapping();
+        let mut type_infos = UnorderedHashMap::<ConcreteTypeId, TypeInfo>::default();
+        for name in [
+            "T",
+            "felt252",
+            "u128",
+            "bytes31",
+            "Option",
+            "NonZeroFelt252",
+            "Tuple<>",
+            "U128AndFelt252",
+            "StorageAddress",
+            "ContractAddress",
+            "BoundedInt0_3",
+            "BoundedInt0_-1",
+            "BoundedInt0_10",
+            "BoundedInt0_0",
+            "BoundedInt2_3",
+        ] {
+            let key = name.into();
+            let long_id = mapping.get_by_left(&key).unwrap().clone();
+            type_infos.insert(
+                key,
+                TypeInfo {
+                    long_id,
+                    storable: true,
+                    droppable: true,
+                    duplicatable: true,
+                    zero_sized: false,
+                },
+            );
+        }
+        for name in ["ArrayFelt252", "ArrayU128"] {
+            let key = name.into();
+            let long_id = mapping.get_by_left(&key).unwrap().clone();
+            type_infos.insert(
+                key,
+                TypeInfo {
+                    long_id,
+                    storable: true,
+                    droppable: true,
+                    duplicatable: false,
+                    zero_sized: false,
+                },
+            );
+        }
+        {
+            let name = "UninitializedFelt252";
+            let key = name.into();
+            let long_id = mapping.get_by_left(&key).unwrap().clone();
+            type_infos.insert(
+                key,
+                TypeInfo {
+                    long_id,
+                    storable: false,
+                    droppable: true,
+                    duplicatable: false,
+                    zero_sized: true,
+                },
+            );
+        }
+        for name in ["GasBuiltin", "System", "RangeCheck", "NonDupEnum", "NonDupStruct"] {
+            let key = name.into();
+            let long_id = mapping.get_by_left(&key).unwrap().clone();
+            type_infos.insert(
+                key,
+                TypeInfo {
+                    long_id,
+                    storable: true,
+                    droppable: false,
+                    duplicatable: false,
+                    zero_sized: false,
+                },
+            );
+        }
+        for name in ["SnapshotRangeCheck", "SnapshotArrayU128"] {
+            let key = name.into();
+            let long_id = mapping.get_by_left(&key).unwrap().clone();
+            type_infos.insert(
+                key,
+                TypeInfo {
+                    long_id,
+                    storable: true,
+                    droppable: true,
+                    duplicatable: true,
+                    zero_sized: false,
+                },
+            );
+        }
+        Self { mapping, type_infos }
     }
 }
 
 impl TypeSpecializationContext for MockSpecializationContext {
-    fn try_get_type_info(&self, id: ConcreteTypeId) -> Option<TypeInfo> {
-        if id == "T".into()
-            || id == "felt252".into()
-            || id == "u128".into()
-            || id == "Option".into()
-            || id == "NonZeroFelt252".into()
-            || id == "NonZeroInt".into()
-            || id == "Tuple<>".into()
-            || id == "U128AndFelt252".into()
-            || id == "StorageAddress".into()
-            || id == "ContractAddress".into()
-        {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: true,
-                droppable: true,
-                duplicatable: true,
-                zero_sized: false,
-            })
-        } else if id == "ArrayFelt252".into() || id == "ArrayU128".into() {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: true,
-                droppable: true,
-                duplicatable: false,
-                zero_sized: false,
-            })
-        } else if id == "UninitializedFelt252".into() || id == "UninitializedU128".into() {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: false,
-                droppable: true,
-                duplicatable: false,
-                zero_sized: true,
-            })
-        } else if id == "GasBuiltin".into()
-            || id == "System".into()
-            || id == "RangeCheck".into()
-            || id == "NonDupEnum".into()
-            || id == "NonDupStruct".into()
-        {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: true,
-                droppable: false,
-                duplicatable: false,
-                zero_sized: false,
-            })
-        } else if id == "SnapshotRangeCheck".into() || id == "SnapshotArrayU128".into() {
-            Some(TypeInfo {
-                long_id: self.mapping.get_by_left(&id)?.clone(),
-                storable: true,
-                droppable: true,
-                duplicatable: true,
-                zero_sized: false,
-            })
-        } else {
-            None
-        }
+    fn try_get_type_info(&self, id: &ConcreteTypeId) -> Option<&TypeInfo> {
+        self.type_infos.get(id)
     }
 }
 impl SignatureSpecializationContext for MockSpecializationContext {
@@ -115,21 +149,9 @@ impl SignatureSpecializationContext for MockSpecializationContext {
     fn try_get_function_signature(&self, function_id: &FunctionId) -> Option<FunctionSignature> {
         self.try_get_function(function_id).map(|f| f.signature)
     }
-
-    fn as_type_specialization_context(&self) -> &dyn TypeSpecializationContext {
-        self
-    }
-
-    fn try_get_function_ap_change(&self, _function_id: &FunctionId) -> Option<SierraApChange> {
-        Some(SierraApChange::Unknown)
-    }
 }
 
 impl SpecializationContext for MockSpecializationContext {
-    fn upcast(&self) -> &dyn SignatureSpecializationContext {
-        self
-    }
-
     fn try_get_function(&self, function_id: &FunctionId) -> Option<Function> {
         match function_id {
             id if id == &"RegisteredFunction".into() => {
@@ -174,6 +196,10 @@ impl SpecializationContext for MockSpecializationContext {
             "Enum<name, UninitializedFelt252>")]
 #[test_case("Enum", vec![type_arg("u128"), type_arg("felt252")] => Err(UnsupportedGenericArg);
             "Enum<u128, felt252>")]
+#[test_case("BoundedInt", vec![value_arg(3), value_arg(2)] => Err(UnsupportedGenericArg);
+            "BoundedInt<3, 2>")]
+#[test_case("BoundedInt", vec![value_arg(0), value_arg(0)] => Ok(());
+            "BoundedInt<0, 0>")]
 #[test_case("Struct", vec![user_type_arg("Unit")] => Ok(()); "Struct<Unit>")]
 #[test_case("Struct", vec![user_type_arg("Wrap"), type_arg("u128")] => Ok(());
             "Struct<Wrap, u128>")]
@@ -182,7 +208,7 @@ impl SpecializationContext for MockSpecializationContext {
 #[test_case("Struct", vec![user_type_arg("name"), value_arg(5)] => Err(UnsupportedGenericArg);
             "Struct<name, 5>")]
 #[test_case("Struct", vec![user_type_arg("name"), type_arg("UninitializedFelt252")]
-            => Err(UnsupportedGenericArg);
+            => Ok(());
             "Struct<name, UninitializedFelt252>")]
 #[test_case("Struct", vec![type_arg("u128"), type_arg("felt252")] => Err(UnsupportedGenericArg);
             "Struct<u128, felt252>")]
@@ -210,7 +236,7 @@ fn find_type_specialization(
             "function_call<&UnregisteredFunction>")]
 #[test_case("function_call", vec![GenericArg::UserFunc("RegisteredFunction".into())]
             => Ok(()); "function_call<&RegisteredFunction>")]
-#[test_case("function_call", vec![] => Err(UnsupportedGenericArg); "function_call")]
+#[test_case("function_call", vec![] => Err(WrongNumberOfGenericArgs); "function_call")]
 #[test_case("array_new", vec![] => Err(WrongNumberOfGenericArgs); "array_new")]
 #[test_case("array_new", vec![type_arg("u128")] => Ok(()); "array_new<u128>")]
 #[test_case("array_append", vec![] => Err(WrongNumberOfGenericArgs); "array_append")]
@@ -236,10 +262,10 @@ fn find_type_specialization(
 #[test_case("u128_const", vec![value_arg(8)] => Ok(()); "u128_const<8>")]
 #[test_case("u128_const", vec![] => Err(UnsupportedGenericArg); "u128_const")]
 #[test_case("storage_base_address_const", vec![value_arg(8)] => Ok(()); "storage_base_address_const<8>")]
-#[test_case("storage_base_address_const", vec![] => Err(UnsupportedGenericArg);
+#[test_case("storage_base_address_const", vec![] => Err(WrongNumberOfGenericArgs);
 "storage_base_address_const")]
 #[test_case("contract_address_const", vec![value_arg(8)] => Ok(()); "contract_address_const<8>")]
-#[test_case("contract_address_const", vec![] => Err(UnsupportedGenericArg);
+#[test_case("contract_address_const", vec![] => Err(WrongNumberOfGenericArgs);
 "contract_address_const")]
 #[test_case("drop", vec![type_arg("u128")] => Ok(()); "drop<u128>")]
 #[test_case("drop", vec![] => Err(WrongNumberOfGenericArgs); "drop<>")]
@@ -291,8 +317,14 @@ Ok(());"enum_init<Option,1>")]
 #[test_case("enum_match", vec![type_arg("Option")] => Ok(()); "enum_match<Option>")]
 #[test_case("enum_match", vec![value_arg(4)] => Err(UnsupportedGenericArg); "enum_match<4>")]
 #[test_case("enum_match", vec![] => Err(WrongNumberOfGenericArgs); "enum_match")]
-#[test_case("enum_snapshot_match", vec![type_arg("Option")] => Ok(()); "enum_snapshot_match<Option>")]
-#[test_case("enum_snapshot_match", vec![type_arg("NonDupEnum")] => Ok(()); "enum_snapshot_match<NonDupEnum>")]
+#[test_case("enum_snapshot_match", vec![type_arg("Option")] => Ok(());
+            "enum_snapshot_match<Option>")]
+#[test_case("enum_snapshot_match", vec![type_arg("NonDupEnum")] => Ok(());
+            "enum_snapshot_match<NonDupEnum>")]
+#[test_case("downcast", vec![type_arg("felt252"), type_arg("bytes31")]
+            => Err(UnsupportedGenericArg); "downcast<felt252, bytes31>")]
+#[test_case("downcast", vec![type_arg("bytes31"), type_arg("BoundedInt0_10")]
+            => Err(UnsupportedGenericArg); "downcast<bytes31, BoundedInt<0, 10>>")]
 #[test_case("struct_construct", vec![type_arg("U128AndFelt252")] => Ok(());
             "struct_construct<U128AndFelt252>")]
 #[test_case("struct_construct", vec![value_arg(4)] => Err(UnsupportedGenericArg);
@@ -314,6 +346,8 @@ Ok(());"enum_init<Option,1>")]
 #[test_case("snapshot_take", vec![type_arg("felt252")] => Ok(()); "snapshot_take<felt252>")]
 #[test_case("snapshot_take", vec![type_arg("SnapshotRangeCheck")] => Ok(());
             "snapshot_take<SnapshotRangeCheck>")]
+#[test_case("coupon_buy", vec![type_arg("felt252")] => Err(UnsupportedGenericArg);
+            "coupon_buy<felt252>")]
 fn find_libfunc_specialization(
     id: &str,
     generic_args: Vec<GenericArg>,

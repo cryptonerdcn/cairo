@@ -1,221 +1,644 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use cairo_lang_diagnostics::{Maybe, ToMaybe};
-use cairo_lang_filesystem::db::FilesGroup;
-use cairo_lang_filesystem::ids::{CrateId, Directory, FileId, FileLongId, VirtualFile};
+use cairo_lang_diagnostics::{
+    DiagnosticNote, Maybe, MaybeAsRef, PluginFileDiagnosticNotes, ToMaybe, skip_diagnostic,
+};
+use cairo_lang_filesystem::db::{ExtAsVirtual, FilesGroup, files_group_input};
+use cairo_lang_filesystem::ids::{
+    CrateId, CrateInput, Directory, FileId, FileKind, FileLongId, SmolStrId, Tracked, VirtualFile,
+};
 use cairo_lang_parser::db::ParserGroup;
+use cairo_lang_syntax::attribute::consts::{
+    ALLOW_ATTR, ALLOW_ATTR_ATTR, DEPRECATED_ATTR, FEATURE_ATTR, FMT_SKIP_ATTR,
+    IMPLICIT_PRECEDENCE_ATTR, INLINE_ATTR, INTERNAL_ATTR, MUST_USE_ATTR, PATH_ATTR, PHANTOM_ATTR,
+    STARKNET_INTERFACE_ATTR, UNSTABLE_ATTR,
+};
+use cairo_lang_syntax::attribute::structured::AttributeStructurize;
 use cairo_lang_syntax::node::ast::MaybeModuleBody;
-use cairo_lang_syntax::node::db::SyntaxGroup;
+use cairo_lang_syntax::node::helpers::QueryAttrs;
 use cairo_lang_syntax::node::ids::SyntaxStablePtrId;
-use cairo_lang_syntax::node::{ast, TypedSyntaxNode};
+use cairo_lang_syntax::node::{Terminal, TypedStablePtr, TypedSyntaxNode, ast};
+use cairo_lang_utils::Intern;
 use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
-use cairo_lang_utils::Upcast;
+use cairo_lang_utils::ordered_hash_set::OrderedHashSet;
+use itertools::{Itertools, chain};
+use salsa::{Database, Setter};
 
+use crate::cache::{DefCacheLoadingData, load_cached_crate_modules};
 use crate::ids::*;
-use crate::plugin::{DynGeneratedFileAuxData, MacroPlugin, PluginDiagnostic};
+use crate::plugin::{DynGeneratedFileAuxData, MacroPlugin, MacroPluginMetadata, PluginDiagnostic};
+use crate::plugin_utils::try_extract_unnamed_arg;
+
+#[salsa::input]
+pub struct DefsGroupInput {
+    #[returns(ref)]
+    pub default_macro_plugins: Option<Vec<MacroPluginLongId>>,
+    #[returns(ref)]
+    pub macro_plugin_overrides: Option<OrderedHashMap<CrateInput, Arc<[MacroPluginLongId]>>>,
+    #[returns(ref)]
+    pub default_inline_macro_plugins: Option<OrderedHashMap<String, InlineMacroExprPluginLongId>>,
+    #[returns(ref)]
+    pub inline_macro_plugin_overrides: Option<
+        OrderedHashMap<CrateInput, Arc<OrderedHashMap<String, InlineMacroExprPluginLongId>>>,
+    >,
+}
+
+/// Returns a reference to the inputs of [DefsGroup].
+/// The reference is also used to set the inputs to new values.
+#[salsa::tracked(returns(ref))]
+pub fn defs_group_input(db: &dyn Database) -> DefsGroupInput {
+    DefsGroupInput::new(db, None, None, None, None)
+}
 
 /// Salsa database interface.
 /// See [`super::ids`] for further details.
-#[salsa::query_group(DefsDatabase)]
-pub trait DefsGroup:
-    FilesGroup
-    + SyntaxGroup
-    + Upcast<dyn SyntaxGroup>
-    + ParserGroup
-    + Upcast<dyn FilesGroup>
-    + HasMacroPlugins
-{
-    #[salsa::interned]
-    fn intern_constant(&self, id: ConstantLongId) -> ConstantId;
-    #[salsa::interned]
-    fn intern_submodule(&self, id: SubmoduleLongId) -> SubmoduleId;
-    #[salsa::interned]
-    fn intern_use(&self, id: UseLongId) -> UseId;
-    #[salsa::interned]
-    fn intern_free_function(&self, id: FreeFunctionLongId) -> FreeFunctionId;
-    #[salsa::interned]
-    fn intern_impl_function(&self, id: ImplFunctionLongId) -> ImplFunctionId;
-    #[salsa::interned]
-    fn intern_struct(&self, id: StructLongId) -> StructId;
-    #[salsa::interned]
-    fn intern_enum(&self, id: EnumLongId) -> EnumId;
-    #[salsa::interned]
-    fn intern_type_alias(&self, id: TypeAliasLongId) -> TypeAliasId;
-    #[salsa::interned]
-    fn intern_impl_alias(&self, id: ImplAliasLongId) -> ImplAliasId;
-    #[salsa::interned]
-    fn intern_member(&self, id: MemberLongId) -> MemberId;
-    #[salsa::interned]
-    fn intern_variant(&self, id: VariantLongId) -> VariantId;
-    #[salsa::interned]
-    fn intern_trait(&self, id: TraitLongId) -> TraitId;
-    #[salsa::interned]
-    fn intern_trait_function(&self, id: TraitFunctionLongId) -> TraitFunctionId;
-    #[salsa::interned]
-    fn intern_impl(&self, id: ImplDefLongId) -> ImplDefId;
-    #[salsa::interned]
-    fn intern_extern_type(&self, id: ExternTypeLongId) -> ExternTypeId;
-    #[salsa::interned]
-    fn intern_extern_function(&self, id: ExternFunctionLongId) -> ExternFunctionId;
-    #[salsa::interned]
-    fn intern_param(&self, id: ParamLongId) -> ParamId;
-    #[salsa::interned]
-    fn intern_generic_param(&self, id: GenericParamLongId) -> GenericParamId;
-    #[salsa::interned]
-    fn intern_local_var(&self, id: LocalVarLongId) -> LocalVarId;
+pub trait DefsGroup: Database {
+    fn default_macro_plugins_input(&self) -> &[MacroPluginLongId] {
+        defs_group_input(self.as_dyn_database()).default_macro_plugins(self).as_ref().unwrap()
+    }
+
+    fn macro_plugin_overrides_input(
+        &self,
+    ) -> &OrderedHashMap<CrateInput, Arc<[MacroPluginLongId]>> {
+        defs_group_input(self.as_dyn_database()).macro_plugin_overrides(self).as_ref().unwrap()
+    }
+
+    fn inline_macro_plugin_overrides_input(
+        &self,
+    ) -> &OrderedHashMap<CrateInput, Arc<OrderedHashMap<String, InlineMacroExprPluginLongId>>> {
+        defs_group_input(self.as_dyn_database())
+            .inline_macro_plugin_overrides(self)
+            .as_ref()
+            .unwrap()
+    }
+
+    fn default_inline_macro_plugins_input(
+        &self,
+    ) -> &OrderedHashMap<String, InlineMacroExprPluginLongId> {
+        defs_group_input(self.as_dyn_database())
+            .default_inline_macro_plugins(self)
+            .as_ref()
+            .unwrap()
+    }
+
+    // Plugins.
+    // ========
+
+    /// Interned version of `default_macro_plugins_input`.
+    fn default_macro_plugins<'db>(&'db self) -> &'db [MacroPluginId<'db>] {
+        default_macro_plugins(self.as_dyn_database())
+    }
+
+    /// Interned version of `macro_plugin_overrides_input`.
+    fn macro_plugin_overrides<'db>(
+        &'db self,
+    ) -> &'db OrderedHashMap<CrateId<'db>, Vec<MacroPluginId<'db>>> {
+        macro_plugin_overrides(self.as_dyn_database())
+    }
+
+    /// Returns [`MacroPluginId`]s of the plugins set for the crate with [`CrateId`].
+    /// Provides an override if it has been set with
+    /// [`DefsGroupEx::set_override_crate_macro_plugins`] or the default
+    /// ([`DefsGroup::default_macro_plugins`]) otherwise.
+    fn crate_macro_plugins<'db>(&'db self, crate_id: CrateId<'db>) -> &'db [MacroPluginId<'db>] {
+        crate_macro_plugins(self.as_dyn_database(), crate_id)
+    }
+
+    /// Interned version of `default_inline_macro_plugins_input`.
+    fn default_inline_macro_plugins<'db>(
+        &'db self,
+    ) -> &'db OrderedHashMap<String, InlineMacroExprPluginId<'db>> {
+        default_inline_macro_plugins(self.as_dyn_database())
+    }
+
+    /// Interned version of `inline_macro_plugin_overrides_input`.
+    fn inline_macro_plugin_overrides<'db>(
+        &'db self,
+    ) -> &'db OrderedHashMap<CrateId<'db>, OrderedHashMap<String, InlineMacroExprPluginId<'db>>>
+    {
+        inline_macro_plugin_overrides(self.as_dyn_database())
+    }
+
+    /// Returns [`InlineMacroExprPluginId`]s of the plugins set for the crate with [`CrateId`].
+    /// Provides an override if it has been set with
+    /// [`DefsGroupEx::set_override_crate_inline_macro_plugins`] or the default
+    /// ([`DefsGroup::default_inline_macro_plugins`]) otherwise.
+    fn crate_inline_macro_plugins<'db>(
+        &'db self,
+        crate_id: CrateId<'db>,
+    ) -> &'db OrderedHashMap<String, InlineMacroExprPluginId<'db>> {
+        crate_inline_macro_plugins(self.as_dyn_database(), crate_id)
+    }
+
+    /// Returns the set of attributes allowed anywhere.
+    /// An attribute on any item that is not in this set will be handled as an unknown attribute.
+    fn allowed_attributes<'db>(
+        &'db self,
+        crate_id: CrateId<'db>,
+    ) -> &'db OrderedHashSet<SmolStrId<'db>> {
+        allowed_attributes(self.as_dyn_database(), crate_id)
+    }
+
+    /// Returns the set of attributes allowed on statements.
+    /// An attribute on a statement that is not in this set will be handled as an unknown attribute.
+    fn allowed_statement_attributes<'db>(&'db self) -> &'db OrderedHashSet<SmolStrId<'db>> {
+        allowed_statement_attributes(self.as_dyn_database())
+    }
+
+    /// Returns the set of `derive` that were declared by a plugin.
+    /// A derive that is not in this set will be handled as an unknown derive.
+    fn declared_derives<'db>(
+        &'db self,
+        crate_id: CrateId<'db>,
+    ) -> &'db OrderedHashSet<SmolStrId<'db>> {
+        declared_derives(self.as_dyn_database(), crate_id)
+    }
+
+    /// Returns the set of attributes that were declared as phantom type attributes by a plugin,
+    /// i.e. a type marked with this attribute is considered a phantom type.
+    fn declared_phantom_type_attributes<'db>(
+        &'db self,
+        crate_id: CrateId<'db>,
+    ) -> &'db OrderedHashSet<SmolStrId<'db>> {
+        declared_phantom_type_attributes(self.as_dyn_database(), crate_id)
+    }
+
+    /// Checks whether the submodule is defined as inline.
+    fn is_submodule_inline<'db>(&self, submodule_id: SubmoduleId<'db>) -> bool {
+        is_submodule_inline(self.as_dyn_database(), submodule_id)
+    }
 
     // Module to syntax.
     /// Gets the main file of the module.
     /// A module might have more virtual files generated by plugins.
-    fn module_main_file(&self, module_id: ModuleId) -> Maybe<FileId>;
+    fn module_main_file<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<FileId<'db>> {
+        module_main_file(self.as_dyn_database(), module_id)
+    }
     /// Gets all the files of a module - main files and generated virtual files.
-    fn module_files(&self, module_id: ModuleId) -> Maybe<Vec<FileId>>;
-    /// Gets a file from a module and a FileIndex (i.e. ModuleFileId).
-    fn module_file(&self, module_id: ModuleFileId) -> Maybe<FileId>;
+    fn module_files<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<&'db [FileId<'db>]> {
+        module_files(self.as_dyn_database(), module_id)
+    }
     /// Gets the directory of a module.
-    fn module_dir(&self, module_id: ModuleId) -> Maybe<Directory>;
+    fn module_dir<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<&'db Directory<'db>> {
+        module_dir(self.as_dyn_database(), module_id)
+    }
 
     // File to module.
-    fn crate_modules(&self, crate_id: CrateId) -> Arc<Vec<ModuleId>>;
-    fn priv_file_to_module_mapping(&self) -> OrderedHashMap<FileId, Vec<ModuleId>>;
-    fn file_modules(&self, file_id: FileId) -> Maybe<Vec<ModuleId>>;
+    fn crate_modules<'db>(&'db self, crate_id: CrateId<'db>) -> &'db [ModuleId<'db>] {
+        crate_modules(self.as_dyn_database(), crate_id)
+    }
+    fn file_modules<'db>(&'db self, file_id: FileId<'db>) -> Maybe<&'db Vec<ModuleId<'db>>> {
+        file_modules(self.as_dyn_database(), file_id).maybe_as_ref()
+    }
 
-    // Module level resolving.
-    fn priv_module_data(&self, module_id: ModuleId) -> Maybe<ModuleData>;
-    fn module_submodules(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<SubmoduleId, ast::ItemModule>>;
-    fn module_submodules_ids(&self, module_id: ModuleId) -> Maybe<Vec<SubmoduleId>>;
-    fn module_constants(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<ConstantId, ast::ItemConstant>>;
-    fn module_constants_ids(&self, module_id: ModuleId) -> Maybe<Vec<ConstantId>>;
-    fn module_free_functions(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<FreeFunctionId, ast::FunctionWithBody>>;
-    fn module_free_functions_ids(&self, module_id: ModuleId) -> Maybe<Vec<FreeFunctionId>>;
-    fn module_items(&self, module_id: ModuleId) -> Maybe<Arc<Vec<ModuleItemId>>>;
+    /// Returns the [ModuleData] of all modules in the crate's cache, and the loading data of the
+    /// [DefsGroup] in the crate.
+    fn cached_crate_modules<'db>(
+        &'db self,
+        crate_id: CrateId<'db>,
+    ) -> Option<ModuleDataCacheAndLoadingData<'db>> {
+        cached_crate_modules(self.as_dyn_database(), crate_id)
+    }
+    fn module_submodules_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [SubmoduleId<'db>]> {
+        module_submodules_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_constants_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [ConstantId<'db>]> {
+        module_constants_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_constant_by_id<'db>(
+        &'db self,
+        constant_data: ConstantId<'db>,
+    ) -> Maybe<ast::ItemConstant<'db>> {
+        module_constant_by_id(self.as_dyn_database(), constant_data)
+    }
+    fn module_free_functions_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [FreeFunctionId<'db>]> {
+        module_free_functions_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_free_function_by_id<'db>(
+        &'db self,
+        free_function_id: FreeFunctionId<'db>,
+    ) -> Maybe<ast::FunctionWithBody<'db>> {
+        module_free_function_by_id(self.as_dyn_database(), free_function_id)
+    }
     /// Returns the stable ptr of the name of a module item.
-    fn module_item_name_stable_ptr(
-        &self,
-        module_id: ModuleId,
-        item_id: ModuleItemId,
-    ) -> Maybe<SyntaxStablePtrId>;
-    fn module_uses(&self, module_id: ModuleId) -> Maybe<OrderedHashMap<UseId, ast::UsePathLeaf>>;
-    fn module_uses_ids(&self, module_id: ModuleId) -> Maybe<Vec<UseId>>;
-    fn module_structs(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<StructId, ast::ItemStruct>>;
-    fn module_structs_ids(&self, module_id: ModuleId) -> Maybe<Vec<StructId>>;
-    fn module_enums(&self, module_id: ModuleId) -> Maybe<OrderedHashMap<EnumId, ast::ItemEnum>>;
-    fn module_enums_ids(&self, module_id: ModuleId) -> Maybe<Vec<EnumId>>;
-    fn module_type_aliases(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<TypeAliasId, ast::ItemTypeAlias>>;
-    fn module_type_aliases_ids(&self, module_id: ModuleId) -> Maybe<Vec<TypeAliasId>>;
-    fn module_impl_aliases(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<ImplAliasId, ast::ItemImplAlias>>;
-    fn module_impl_aliases_ids(&self, module_id: ModuleId) -> Maybe<Vec<ImplAliasId>>;
-    fn module_traits(&self, module_id: ModuleId) -> Maybe<OrderedHashMap<TraitId, ast::ItemTrait>>;
-    fn module_traits_ids(&self, module_id: ModuleId) -> Maybe<Vec<TraitId>>;
-    fn module_impls(&self, module_id: ModuleId) -> Maybe<OrderedHashMap<ImplDefId, ast::ItemImpl>>;
-    fn module_impls_ids(&self, module_id: ModuleId) -> Maybe<Vec<ImplDefId>>;
-    fn module_extern_types(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<ExternTypeId, ast::ItemExternType>>;
-    fn module_extern_types_ids(&self, module_id: ModuleId) -> Maybe<Vec<ExternTypeId>>;
-    fn module_extern_functions(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<OrderedHashMap<ExternFunctionId, ast::ItemExternFunction>>;
-    fn module_extern_functions_ids(&self, module_id: ModuleId) -> Maybe<Vec<ExternFunctionId>>;
-    fn module_generated_file_infos(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<Vec<Option<GeneratedFileInfo>>>;
-    fn module_plugin_diagnostics(
-        &self,
-        module_id: ModuleId,
-    ) -> Maybe<Vec<(ModuleFileId, PluginDiagnostic)>>;
-}
+    fn module_item_name_stable_ptr<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+        item_id: ModuleItemId<'db>,
+    ) -> Maybe<SyntaxStablePtrId<'db>> {
+        module_item_name_stable_ptr(self.as_dyn_database(), module_id, item_id)
+    }
+    fn module_uses_ids<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<&'db [UseId<'db>]> {
+        module_uses_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_use_by_id<'db>(&'db self, use_id: UseId<'db>) -> Maybe<ast::UsePathLeaf<'db>> {
+        module_use_by_id(self.as_dyn_database(), use_id)
+    }
+    fn module_global_use_by_id<'db>(
+        &'db self,
+        global_use_id: GlobalUseId<'db>,
+    ) -> Maybe<ast::UsePathStar<'db>> {
+        module_global_use_by_id(self.as_dyn_database(), global_use_id)
+    }
+    fn module_structs_ids<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<&'db [StructId<'db>]> {
+        module_structs_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_struct_by_id<'db>(
+        &'db self,
+        struct_id: StructId<'db>,
+    ) -> Maybe<ast::ItemStruct<'db>> {
+        module_struct_by_id(self.as_dyn_database(), struct_id)
+    }
+    fn module_enums_ids<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<&'db [EnumId<'db>]> {
+        module_enums_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_enum_by_id<'db>(&'db self, enum_id: EnumId<'db>) -> Maybe<ast::ItemEnum<'db>> {
+        module_enum_by_id(self.as_dyn_database(), enum_id)
+    }
+    fn module_type_aliases_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [ModuleTypeAliasId<'db>]> {
+        module_type_aliases_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_type_alias_by_id<'db>(
+        &'db self,
+        module_type_alias_id: ModuleTypeAliasId<'db>,
+    ) -> Maybe<ast::ItemTypeAlias<'db>> {
+        module_type_alias_by_id(self.as_dyn_database(), module_type_alias_id)
+    }
+    fn module_impl_aliases_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [ImplAliasId<'db>]> {
+        module_impl_aliases_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_impl_alias_by_id<'db>(
+        &'db self,
+        impl_alias_id: ImplAliasId<'db>,
+    ) -> Maybe<ast::ItemImplAlias<'db>> {
+        module_impl_alias_by_id(self.as_dyn_database(), impl_alias_id)
+    }
+    fn module_traits_ids<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<&'db [TraitId<'db>]> {
+        module_traits_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_trait_by_id<'db>(&'db self, trait_id: TraitId<'db>) -> Maybe<ast::ItemTrait<'db>> {
+        module_trait_by_id(self.as_dyn_database(), trait_id)
+    }
+    fn module_impls_ids<'db>(&'db self, module_id: ModuleId<'db>) -> Maybe<&'db [ImplDefId<'db>]> {
+        module_impls_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_impl_by_id<'db>(&'db self, impl_id: ImplDefId<'db>) -> Maybe<ast::ItemImpl<'db>> {
+        module_impl_by_id(self.as_dyn_database(), impl_id)
+    }
+    fn module_extern_types_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [ExternTypeId<'db>]> {
+        module_extern_types_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_extern_type_by_id<'db>(
+        &'db self,
+        extern_type_id: ExternTypeId<'db>,
+    ) -> Maybe<ast::ItemExternType<'db>> {
+        module_extern_type_by_id(self.as_dyn_database(), extern_type_id)
+    }
+    fn module_extern_functions_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [ExternFunctionId<'db>]> {
+        module_extern_functions_ids(self.as_dyn_database(), module_id)
+    }
+    fn module_extern_function_by_id<'db>(
+        &'db self,
+        extern_function_id: ExternFunctionId<'db>,
+    ) -> Maybe<ast::ItemExternFunction<'db>> {
+        module_extern_function_by_id(self.as_dyn_database(), extern_function_id)
+    }
 
-pub trait HasMacroPlugins {
-    fn macro_plugins(&self) -> Vec<Arc<dyn MacroPlugin>>;
-}
+    /// Returns the IDs of the macro declarations in the module.
+    fn module_macro_declarations_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [MacroDeclarationId<'db>]> {
+        module_macro_declarations_ids(self.as_dyn_database(), module_id)
+    }
+    /// Returns the macro declaration by its ID.
+    fn module_macro_declaration_by_id<'db>(
+        &'db self,
+        macro_declaration_id: MacroDeclarationId<'db>,
+    ) -> Maybe<ast::ItemMacroDeclaration<'db>> {
+        module_macro_declaration_by_id(self.as_dyn_database(), macro_declaration_id)
+    }
 
-fn module_main_file(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<FileId> {
-    Ok(match module_id {
-        ModuleId::CrateRoot(crate_id) => {
-            db.crate_root_dir(crate_id).to_maybe()?.file(db.upcast(), "lib.cairo".into())
-        }
-        ModuleId::Submodule(submodule_id) => {
-            let parent = submodule_id.parent_module(db);
-            let item_module_ast = &db.priv_module_data(parent)?.submodules[submodule_id];
-            match item_module_ast.body(db.upcast()) {
-                MaybeModuleBody::Some(_) => {
-                    // This is an inline module, we return the file where the inline module was
-                    // defined. It can be either the file of the parent module
-                    // or a plugin-generated virtual file.
-                    db.module_file(submodule_id.module_file_id(db))?
-                }
-                MaybeModuleBody::None(_) => {
-                    let name = submodule_id.name(db);
-                    db.module_dir(parent)?.file(db.upcast(), format!("{name}.cairo").into())
-                }
-            }
-        }
-    })
-}
-
-fn module_files(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<FileId>> {
-    Ok(db.priv_module_data(module_id)?.files)
-}
-
-fn module_file(db: &dyn DefsGroup, module_file_id: ModuleFileId) -> Maybe<FileId> {
-    Ok(db.module_files(module_file_id.0)?[module_file_id.1.0])
-}
-
-fn module_dir(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Directory> {
-    match module_id {
-        ModuleId::CrateRoot(crate_id) => db.crate_root_dir(crate_id).to_maybe(),
-        ModuleId::Submodule(submodule_id) => {
-            let parent = submodule_id.parent_module(db);
-            let name = submodule_id.name(db);
-            Ok(db.module_dir(parent)?.subdir(name))
-        }
+    /// Returns the IDs of the macro calls in the module.
+    fn module_macro_calls_ids<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> Maybe<&'db [MacroCallId<'db>]> {
+        module_macro_calls_ids(self.as_dyn_database(), module_id)
+    }
+    /// Returns the macro call by its ID.
+    fn module_macro_call_by_id<'db>(
+        &'db self,
+        macro_call_id: MacroCallId<'db>,
+    ) -> Maybe<ast::ItemInlineMacro<'db>> {
+        module_macro_call_by_id(self.as_dyn_database(), macro_call_id)
+    }
+    /// Returns the ancestors of a module.
+    fn module_ancestors<'db>(
+        &'db self,
+        module_id: ModuleId<'db>,
+    ) -> &'db OrderedHashSet<ModuleId<'db>> {
+        module_ancestors_helper(self.as_dyn_database(), (), module_id)
+    }
+    /// Returns the module that the module is perceived as.
+    /// Specifically if this is a macro call, it returns the module that the macro call was called
+    /// from, including recursive calls.
+    fn module_perceived_module<'db>(&'db self, module_id: ModuleId<'db>) -> ModuleId<'db> {
+        module_perceived_module_helper(self.as_dyn_database(), (), module_id)
     }
 }
 
+impl<T: Database + ?Sized> DefsGroup for T {}
+
+/// Initializes the [`DefsGroup`] database to a proper state.
+pub fn init_defs_group(db: &mut dyn Database) {
+    defs_group_input(db).set_macro_plugin_overrides(db).to(Some(OrderedHashMap::default()));
+    defs_group_input(db).set_inline_macro_plugin_overrides(db).to(Some(OrderedHashMap::default()));
+}
+
+#[salsa::tracked(returns(ref))]
+fn default_macro_plugins_helper<'db>(db: &'db dyn Database) -> Vec<MacroPluginId<'db>> {
+    db.default_macro_plugins_input()
+        .iter()
+        .map(|plugin| MacroPluginId::new(db, plugin.clone()))
+        .collect()
+}
+
+pub fn default_macro_plugins<'db>(db: &'db dyn Database) -> &'db [MacroPluginId<'db>] {
+    default_macro_plugins_helper(db)
+}
+
+#[salsa::tracked(returns(ref))]
+pub fn macro_plugin_overrides<'db>(
+    db: &'db dyn Database,
+) -> OrderedHashMap<CrateId<'db>, Vec<MacroPluginId<'db>>> {
+    let inp = db.macro_plugin_overrides_input();
+    inp.iter()
+        .map(|(crate_id, plugins)| {
+            (
+                crate_id.clone().into_crate_long_id(db).intern(db),
+                plugins.iter().map(|plugin| plugin.clone().intern(db)).collect(),
+            )
+        })
+        .collect()
+}
+
+#[salsa::tracked(returns(ref))]
+pub fn inline_macro_plugin_overrides<'db>(
+    db: &'db dyn Database,
+) -> OrderedHashMap<CrateId<'db>, OrderedHashMap<String, InlineMacroExprPluginId<'db>>> {
+    let inp = db.inline_macro_plugin_overrides_input();
+    inp.iter()
+        .map(|(crate_id, plugins)| {
+            (
+                crate_id.clone().into_crate_long_id(db).intern(db),
+                plugins
+                    .iter()
+                    .map(|(name, plugin)| (name.clone(), plugin.clone().intern(db)))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+#[salsa::tracked(returns(ref))]
+pub fn default_inline_macro_plugins<'db>(
+    db: &'db dyn Database,
+) -> OrderedHashMap<String, InlineMacroExprPluginId<'db>> {
+    let inp = db.default_inline_macro_plugins_input();
+    inp.iter().map(|(name, plugin)| (name.clone(), plugin.clone().intern(db))).collect()
+}
+
+fn crate_macro_plugins<'db>(
+    db: &'db dyn Database,
+    crate_id: CrateId<'db>,
+) -> &'db [MacroPluginId<'db>] {
+    macro_plugin_overrides(db).get(&crate_id).unwrap_or_else(|| default_macro_plugins_helper(db))
+}
+
+fn crate_inline_macro_plugins<'db>(
+    db: &'db dyn Database,
+    crate_id: CrateId<'db>,
+) -> &'db OrderedHashMap<String, InlineMacroExprPluginId<'db>> {
+    db.inline_macro_plugin_overrides()
+        .get(&crate_id)
+        .unwrap_or_else(|| db.default_inline_macro_plugins())
+}
+
+#[salsa::tracked(returns(ref))]
+fn allowed_attributes<'db>(
+    db: &'db dyn Database,
+    crate_id: CrateId<'db>,
+) -> OrderedHashSet<SmolStrId<'db>> {
+    let base_attrs = [
+        INLINE_ATTR,
+        MUST_USE_ATTR,
+        UNSTABLE_ATTR,
+        DEPRECATED_ATTR,
+        INTERNAL_ATTR,
+        ALLOW_ATTR,
+        ALLOW_ATTR_ATTR,
+        FEATURE_ATTR,
+        PHANTOM_ATTR,
+        IMPLICIT_PRECEDENCE_ATTR,
+        FMT_SKIP_ATTR,
+        PATH_ATTR,
+        // TODO(orizi): Remove this once `starknet` is removed from corelib.
+        STARKNET_INTERFACE_ATTR,
+    ];
+
+    let crate_plugins = db.crate_macro_plugins(crate_id);
+
+    OrderedHashSet::from_iter(chain!(
+        base_attrs.map(|attr| SmolStrId::from(db, attr)),
+        crate_plugins.iter().flat_map(|plugin| plugin.long(db).declared_attributes(db))
+    ))
+}
+
+// TODO(eytan-starkware): Untrack this
+#[salsa::tracked(returns(ref))]
+fn allowed_statement_attributes<'db>(db: &'db dyn Database) -> OrderedHashSet<SmolStrId<'db>> {
+    let all_attributes = [FMT_SKIP_ATTR, ALLOW_ATTR, FEATURE_ATTR];
+    OrderedHashSet::from_iter(all_attributes.map(|attr| SmolStrId::from(db, attr)))
+}
+
+#[salsa::tracked(returns(ref))]
+fn declared_derives<'db>(
+    db: &'db dyn Database,
+    crate_id: CrateId<'db>,
+) -> OrderedHashSet<SmolStrId<'db>> {
+    OrderedHashSet::from_iter(
+        db.crate_macro_plugins(crate_id)
+            .iter()
+            .flat_map(|plugin| plugin.long(db).declared_derives(db)),
+    )
+}
+
+#[salsa::tracked(returns(ref))]
+fn declared_phantom_type_attributes<'db>(
+    db: &'db dyn Database,
+    crate_id: CrateId<'db>,
+) -> OrderedHashSet<SmolStrId<'db>> {
+    let crate_plugins = db.crate_macro_plugins(crate_id);
+
+    OrderedHashSet::from_iter(chain!(
+        [SmolStrId::from(db, PHANTOM_ATTR)],
+        crate_plugins.iter().flat_map(|plugin| plugin.long(db).phantom_type_attributes(db))
+    ))
+}
+
+#[salsa::tracked]
+fn is_submodule_inline<'db>(db: &'db dyn Database, submodule_id: SubmoduleId<'db>) -> bool {
+    match submodule_id.stable_ptr(db).lookup(db).body(db) {
+        MaybeModuleBody::Some(_) => true,
+        MaybeModuleBody::None(_) => false,
+    }
+}
+
+#[salsa::tracked]
+fn module_main_file_helper<'db>(
+    db: &'db dyn Database,
+    _tracked: Tracked,
+    module_id: ModuleId<'db>,
+) -> Maybe<FileId<'db>> {
+    Ok(match module_id {
+        ModuleId::CrateRoot(crate_id) => {
+            db.crate_config(crate_id).to_maybe()?.root.file(db, "lib.cairo")
+        }
+        ModuleId::Submodule(submodule_id) => {
+            let parent = submodule_id.parent_module(db);
+            if db.is_submodule_inline(submodule_id) {
+                // This is an inline module, we return the file where the inline module was
+                // defined. It can be either the file of the parent module
+                // or a plugin-generated virtual file.
+                submodule_id.stable_ptr(db).untyped().file_id(db)
+            } else if let Some(path_override) = submodule_path_override(db, submodule_id) {
+                path_override
+            } else {
+                db.module_dir(parent)?
+                    .file(db, &format!("{}.cairo", submodule_id.name(db).long(db)))
+            }
+        }
+        // This is a macro-generated module, so the main file is the generated file.
+        ModuleId::MacroCall { generated_file_id, .. } => generated_file_id,
+    })
+}
+
+fn module_main_file<'db>(db: &'db dyn Database, module_id: ModuleId<'db>) -> Maybe<FileId<'db>> {
+    module_main_file_helper(db, (), module_id)
+}
+
+fn module_files<'db>(db: &'db dyn Database, module_id: ModuleId<'db>) -> Maybe<&'db [FileId<'db>]> {
+    Ok(module_id.module_data(db)?.files(db))
+}
+
+// TODO(eytan-starkware): This doesn't really need to be tracked.
+#[salsa::tracked(returns(ref))]
+fn module_dir_helper<'db>(
+    db: &'db dyn Database,
+    _tracked: Tracked,
+    module_id: ModuleId<'db>,
+) -> Maybe<Directory<'db>> {
+    match module_id {
+        ModuleId::CrateRoot(crate_id) => {
+            db.crate_config(crate_id).to_maybe().map(|config| config.root.clone())
+        }
+        ModuleId::Submodule(submodule_id) => {
+            let parent = submodule_id.parent_module(db);
+            let name = submodule_id.name(db);
+            Ok(db.module_dir(parent)?.subdir(name.long(db)))
+        }
+        // This is a macro call, we return the directory for the file that contained the macro
+        // call, as it is considered the location of the macro itself.
+        ModuleId::MacroCall { id, .. } => db.module_dir(id.parent_module(db)).cloned(),
+    }
+}
+
+/// Extracts an override path from a `#[path("...")]` attribute on the submodule declaration, if
+/// any. The returned string can be a relative path (resolved against the parent module directory)
+/// or an absolute path.
+fn submodule_path_override<'db>(
+    db: &'db dyn Database,
+    submodule_id: SubmoduleId<'db>,
+) -> Option<FileId<'db>> {
+    // Get the parent module's AST for this submodule.
+    let parent = submodule_id.parent_module(db);
+    let parent_data = parent.module_data(db).ok()?;
+    let item_module_ast = parent_data.submodules(db).get(&submodule_id)?.clone();
+
+    let attr_ast = item_module_ast.find_attr(db, PATH_ATTR)?;
+    let terminal = extract_path_arg(db, &attr_ast.arguments(db))?;
+    let path = terminal.string_value(db)?;
+    /// Find the module where the parents of this module is defined.
+    fn find_base<'db>(db: &'db dyn Database, module_id: ModuleId<'db>) -> ModuleId<'db> {
+        match module_id {
+            ModuleId::CrateRoot(crate_id) => ModuleId::CrateRoot(crate_id),
+            ModuleId::Submodule(submodule_id) => submodule_id.parent_module(db),
+            ModuleId::MacroCall { id, .. } => find_base(db, id.parent_module(db)),
+        }
+    }
+    let base = find_base(db, parent);
+    Some(db.module_dir(base).ok()?.file(db, &path))
+}
+
+fn module_dir<'db>(db: &'db dyn Database, module_id: ModuleId<'db>) -> Maybe<&'db Directory<'db>> {
+    module_dir_helper(db, (), module_id).maybe_as_ref()
+}
+
 /// Appends all the modules under the given module, including nested modules.
-fn collect_modules_under(db: &dyn DefsGroup, modules: &mut Vec<ModuleId>, module_id: ModuleId) {
+fn collect_modules_under<'db>(
+    db: &'db dyn Database,
+    modules: &mut Vec<ModuleId<'db>>,
+    module_id: ModuleId<'db>,
+) {
     modules.push(module_id);
-    for submodule_module_id in db.module_submodules_ids(module_id).unwrap_or_default().into_iter() {
-        collect_modules_under(db, modules, ModuleId::Submodule(submodule_module_id));
+    if let Ok(submodule_ids) = db.module_submodules_ids(module_id) {
+        for submodule_module_id in submodule_ids.iter().copied() {
+            collect_modules_under(db, modules, ModuleId::Submodule(submodule_module_id));
+        }
     }
 }
 
 /// Returns all the modules in the crate, including recursively.
-fn crate_modules(db: &dyn DefsGroup, crate_id: CrateId) -> Arc<Vec<ModuleId>> {
+#[salsa::tracked(returns(ref))]
+fn crate_modules<'db>(db: &'db dyn Database, crate_id: CrateId<'db>) -> Vec<ModuleId<'db>> {
     let mut modules = Vec::new();
     collect_modules_under(db, &mut modules, ModuleId::CrateRoot(crate_id));
-    Arc::new(modules)
+    modules
 }
 
-fn priv_file_to_module_mapping(db: &dyn DefsGroup) -> OrderedHashMap<FileId, Vec<ModuleId>> {
-    let mut mapping = OrderedHashMap::<FileId, Vec<ModuleId>>::default();
+/// Returns a mapping from file IDs to the modules that contain them.
+#[salsa::tracked(returns(ref))]
+fn file_to_module_mapping<'db>(
+    db: &'db dyn Database,
+) -> OrderedHashMap<FileId<'db>, Vec<ModuleId<'db>>> {
+    let mut mapping = OrderedHashMap::<FileId<'db>, Vec<ModuleId<'db>>>::default();
     for crate_id in db.crates() {
-        for module_id in db.crate_modules(crate_id).iter().copied() {
+        for module_id in db.crate_modules(*crate_id).iter().copied() {
             if let Ok(files) = db.module_files(module_id) {
-                for file_id in files {
+                for file_id in files.iter().copied() {
                     match mapping.get_mut(&file_id) {
                         Some(file_modules) => {
                             file_modules.push(module_id);
@@ -230,425 +653,1260 @@ fn priv_file_to_module_mapping(db: &dyn DefsGroup) -> OrderedHashMap<FileId, Vec
     }
     mapping
 }
-fn file_modules(db: &dyn DefsGroup, file_id: FileId) -> Maybe<Vec<ModuleId>> {
-    db.priv_file_to_module_mapping().get(&file_id).cloned().to_maybe()
+
+#[salsa::tracked(returns(ref))]
+fn file_modules<'db>(db: &'db dyn Database, file_id: FileId<'db>) -> Maybe<Vec<ModuleId<'db>>> {
+    file_to_module_mapping(db).get(&file_id).cloned().to_maybe()
 }
 
-/// Information about the generation of a virtual file.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GeneratedFileInfo {
-    pub aux_data: DynGeneratedFileAuxData,
-    /// The module and file index from which the current file was generated.
-    pub origin: ModuleFileId,
+#[salsa::tracked]
+pub struct ModuleData<'db> {
+    /// The list of IDs of all items in the module. Each ID here is guaranteed to be a key in one
+    /// of the specific-item-kind maps.
+    #[returns(ref)]
+    pub items: Vec<ModuleItemId<'db>>,
+
+    // Splitting into parts to avoid overly large tuples in salsa, which fails to compile.
+    /// Data for type items.
+    #[returns(ref)]
+    types_data: ModuleTypesData<'db>,
+    /// Data for non-type named items.
+    #[returns(ref)]
+    named_items_data: ModuleNamedItemsData<'db>,
+    /// Data for unnamed items.
+    #[returns(ref)]
+    unnamed_items_data: ModuleUnnamedItemsData<'db>,
+    /// Data for files.
+    #[returns(ref)]
+    files_data: ModuleFilesData<'db>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ModuleData {
-    items: Arc<Vec<ModuleItemId>>,
-    constants: OrderedHashMap<ConstantId, ast::ItemConstant>,
-    submodules: OrderedHashMap<SubmoduleId, ast::ItemModule>,
-    uses: OrderedHashMap<UseId, ast::UsePathLeaf>,
-    free_functions: OrderedHashMap<FreeFunctionId, ast::FunctionWithBody>,
-    structs: OrderedHashMap<StructId, ast::ItemStruct>,
-    enums: OrderedHashMap<EnumId, ast::ItemEnum>,
-    type_aliases: OrderedHashMap<TypeAliasId, ast::ItemTypeAlias>,
-    impl_aliases: OrderedHashMap<ImplAliasId, ast::ItemImplAlias>,
-    traits: OrderedHashMap<TraitId, ast::ItemTrait>,
-    impls: OrderedHashMap<ImplDefId, ast::ItemImpl>,
-    extern_types: OrderedHashMap<ExternTypeId, ast::ItemExternType>,
-    extern_functions: OrderedHashMap<ExternFunctionId, ast::ItemExternFunction>,
-    files: Vec<FileId>,
+#[salsa::tracked]
+pub struct ModuleTypesData<'db> {
+    /// All the structs of the given module.
+    #[returns(ref)]
+    structs: OrderedHashMap<StructId<'db>, ast::ItemStruct<'db>>,
+    /// All the enums of the given module.
+    #[returns(ref)]
+    enums: OrderedHashMap<EnumId<'db>, ast::ItemEnum<'db>>,
+    /// All the type aliases of the given module.
+    #[returns(ref)]
+    type_aliases: OrderedHashMap<ModuleTypeAliasId<'db>, ast::ItemTypeAlias<'db>>,
+    /// All the extern types of the given module.
+    #[returns(ref)]
+    extern_types: OrderedHashMap<ExternTypeId<'db>, ast::ItemExternType<'db>>,
+}
+
+#[salsa::tracked]
+pub struct ModuleNamedItemsData<'db> {
+    /// All the constants of the given module.
+    #[returns(ref)]
+    constants: OrderedHashMap<ConstantId<'db>, ast::ItemConstant<'db>>,
+    /// All the *direct* submodules of the given module - including those generated by
+    /// macro plugins. To get all the submodules including nested modules, use
+    /// [`collect_modules_under`].
+    #[returns(ref)]
+    submodules: OrderedHashMap<SubmoduleId<'db>, ast::ItemModule<'db>>,
+    /// All the uses of the given module.
+    #[returns(ref)]
+    uses: OrderedHashMap<UseId<'db>, ast::UsePathLeaf<'db>>,
+    #[returns(ref)]
+    free_functions: OrderedHashMap<FreeFunctionId<'db>, ast::FunctionWithBody<'db>>,
+    /// All the impl aliases of the given module.
+    #[returns(ref)]
+    impl_aliases: OrderedHashMap<ImplAliasId<'db>, ast::ItemImplAlias<'db>>,
+    /// All the traits of the given module.
+    #[returns(ref)]
+    traits: OrderedHashMap<TraitId<'db>, ast::ItemTrait<'db>>,
+    /// All the impls of the given module.
+    #[returns(ref)]
+    impls: OrderedHashMap<ImplDefId<'db>, ast::ItemImpl<'db>>,
+    /// All the extern functions of the given module.
+    #[returns(ref)]
+    extern_functions: OrderedHashMap<ExternFunctionId<'db>, ast::ItemExternFunction<'db>>,
+    /// All the macro declarations of the given module.
+    #[returns(ref)]
+    macro_declarations: OrderedHashMap<MacroDeclarationId<'db>, ast::ItemMacroDeclaration<'db>>,
+}
+#[salsa::tracked]
+pub struct ModuleUnnamedItemsData<'db> {
+    /// All the global uses of the given module.
+    #[returns(ref)]
+    global_uses: OrderedHashMap<GlobalUseId<'db>, ast::UsePathStar<'db>>,
+    /// Calls to inline macros in the module (only those that were not handled by plugins).
+    #[returns(ref)]
+    macro_calls: OrderedHashMap<MacroCallId<'db>, ast::ItemInlineMacro<'db>>,
+}
+
+#[salsa::tracked]
+pub struct ModuleFilesData<'db> {
+    #[returns(ref)]
+    files: Vec<FileId<'db>>,
     /// Generation info for each file. Virtual files have Some. Other files have None.
-    generated_file_infos: Vec<Option<GeneratedFileInfo>>,
-    plugin_diagnostics: Vec<(ModuleFileId, PluginDiagnostic)>,
+    #[returns(ref)]
+    generated_file_aux_data: OrderedHashMap<FileId<'db>, Option<DynGeneratedFileAuxData>>,
+    #[returns(ref)]
+    plugin_diagnostics: Vec<(ModuleId<'db>, PluginDiagnostic<'db>)>,
+    /// Diagnostic notes for diagnostics originating in the plugin generated files identified by
+    /// [`FileId`].
+    /// Diagnostic notes are added with `note: ` prefix at the end of diagnostic display.
+    #[returns(ref)]
+    diagnostics_notes: PluginFileDiagnosticNotes<'db>,
 }
 
-// TODO(spapini): Make this private.
-fn priv_module_data(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<ModuleData> {
-    let syntax_db = db.upcast();
-    let module_file = db.module_main_file(module_id)?;
+impl<'db> ModuleData<'db> {
+    /// All the constants of the given module.
+    pub fn constants(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<ConstantId<'db>, ast::ItemConstant<'db>> {
+        self.named_items_data(db).constants(db)
+    }
+    /// All the submodules of the given module.
+    pub fn submodules(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<SubmoduleId<'db>, ast::ItemModule<'db>> {
+        self.named_items_data(db).submodules(db)
+    }
+    /// All the uses of the given module.
+    pub fn uses(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<UseId<'db>, ast::UsePathLeaf<'db>> {
+        self.named_items_data(db).uses(db)
+    }
+    /// All the free functions of the given module.
+    pub fn free_functions(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<FreeFunctionId<'db>, ast::FunctionWithBody<'db>> {
+        self.named_items_data(db).free_functions(db)
+    }
+    /// All the structs of the given module.
+    pub fn structs(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<StructId<'db>, ast::ItemStruct<'db>> {
+        self.types_data(db).structs(db)
+    }
 
-    let file_syntax = db.file_syntax(module_file)?;
-    let mut main_file_info: Option<GeneratedFileInfo> = None;
-    let item_asts = match module_id {
-        ModuleId::CrateRoot(_) => file_syntax.items(syntax_db),
-        ModuleId::Submodule(submodule_id) => {
-            let parent_module_data = db.priv_module_data(submodule_id.parent_module(db))?;
-            let item_module_ast = &parent_module_data.submodules[submodule_id];
+    /// All the enums of the given module.
+    pub fn enums(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<EnumId<'db>, ast::ItemEnum<'db>> {
+        self.types_data(db).enums(db)
+    }
 
-            match item_module_ast.body(syntax_db) {
-                MaybeModuleBody::Some(body) => {
-                    // TODO(spapini): Diagnostics in this module that get mapped to parent module
-                    // should lie in that modules ModuleData, or somehow collected by its
-                    // diagnostics collector function.
+    /// All the type aliases of the given module.
+    pub fn type_aliases(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<ModuleTypeAliasId<'db>, ast::ItemTypeAlias<'db>> {
+        self.types_data(db).type_aliases(db)
+    }
 
-                    // If this is an inline module, copy its generation file info from the parent
-                    // module, from the file where this submodule was defined.
-                    main_file_info = parent_module_data.generated_file_infos
-                        [submodule_id.file_index(db).0]
-                        .clone();
-                    body.items(syntax_db)
-                }
-                MaybeModuleBody::None(_) => file_syntax.items(syntax_db),
-            }
+    /// All the impl aliases of the given module.
+    pub fn impl_aliases(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<ImplAliasId<'db>, ast::ItemImplAlias<'db>> {
+        self.named_items_data(db).impl_aliases(db)
+    }
+    /// All the traits of the given module.
+    pub fn traits(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<TraitId<'db>, ast::ItemTrait<'db>> {
+        self.named_items_data(db).traits(db)
+    }
+    /// All the impls of the given module.
+    pub fn impls(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<ImplDefId<'db>, ast::ItemImpl<'db>> {
+        self.named_items_data(db).impls(db)
+    }
+    /// All the extern types of the given module.
+    pub fn extern_types(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<ExternTypeId<'db>, ast::ItemExternType<'db>> {
+        self.types_data(db).extern_types(db)
+    }
+    /// All the extern functions of the given module.
+    pub fn extern_functions(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<ExternFunctionId<'db>, ast::ItemExternFunction<'db>> {
+        self.named_items_data(db).extern_functions(db)
+    }
+    /// All the macro declarations of the given module.
+    pub fn macro_declarations(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<MacroDeclarationId<'db>, ast::ItemMacroDeclaration<'db>> {
+        self.named_items_data(db).macro_declarations(db)
+    }
+    /// All the global uses of the given module.
+    pub fn global_uses(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<GlobalUseId<'db>, ast::UsePathStar<'db>> {
+        self.unnamed_items_data(db).global_uses(db)
+    }
+    /// Calls to inline macros in the module (only those that were not handled by plugins).
+    pub fn macro_calls(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<MacroCallId<'db>, ast::ItemInlineMacro<'db>> {
+        self.unnamed_items_data(db).macro_calls(db)
+    }
+
+    /// All the files of the given module.
+    pub fn files(&self, db: &'db dyn Database) -> &'db Vec<FileId<'db>> {
+        self.files_data(db).files(db)
+    }
+
+    /// Generation info for each file. Virtual files have Some. Other files have None.
+    pub fn generated_file_aux_data(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db OrderedHashMap<FileId<'db>, Option<DynGeneratedFileAuxData>> {
+        self.files_data(db).generated_file_aux_data(db)
+    }
+
+    pub fn plugin_diagnostics(
+        &self,
+        db: &'db dyn Database,
+    ) -> &'db Vec<(ModuleId<'db>, PluginDiagnostic<'db>)> {
+        self.files_data(db).plugin_diagnostics(db)
+    }
+
+    /// Diagnostic notes for diagnostics originating in the plugin generated files identified by
+    /// [`FileId`].
+    /// Diagnostic notes are added with `note: ` prefix at the end of diagnostic display.
+    pub fn diagnostics_notes(&self, db: &'db dyn Database) -> &'db PluginFileDiagnosticNotes<'db> {
+        self.files_data(db).diagnostics_notes(db)
+    }
+}
+
+/// Information about generated files from running on a module file.
+#[derive(Clone, Debug, Eq, PartialEq, salsa::Update)]
+pub struct PrivModuleSubFiles<'db> {
+    /// The files generated by plugins running on items.
+    files: OrderedHashMap<FileId<'db>, VirtualFile<'db>>,
+    /// The aux data per such file.
+    aux_data: OrderedHashMap<FileId<'db>, Option<DynGeneratedFileAuxData>>,
+    /// The items not filtered out by plugins.
+    items: Vec<ast::ModuleItem<'db>>,
+    /// The diagnostics generated by the plugins.
+    plugin_diagnostics: Vec<PluginDiagnostic<'db>>,
+    /// Diagnostic notes for diagnostics originating in the plugin generated files identified by
+    /// [`FileId`].
+    /// Diagnostic notes are added with `note: ` prefix at the end of diagnostic display.
+    diagnostics_notes: PluginFileDiagnosticNotes<'db>,
+}
+
+#[salsa::tracked]
+fn priv_module_data_helper<'db>(
+    db: &'db dyn Database,
+    _tracked: Tracked,
+    module_id: ModuleId<'db>,
+) -> Maybe<ModuleData<'db>> {
+    let crate_id = module_id.owning_crate(db);
+
+    if let Some((map, _)) = db.cached_crate_modules(crate_id) {
+        if let Some(module_data) = map.get(&module_id) {
+            return Ok(*module_data);
+        } else {
+            panic!("module not found in cached modules_data {:?}", module_id.name(db));
         }
     };
 
-    let mut module_queue = VecDeque::new();
-    module_queue.push_back((module_file, item_asts));
-    let mut res = ModuleData::default();
+    let module_file = db.module_main_file(module_id)?;
+    let main_file_aux_data = if let ModuleId::Submodule(submodule_id) = module_id {
+        let parent_module_data = submodule_id.module_data(db)?;
+        let item_module_ast = &parent_module_data.submodules(db)[&submodule_id];
+        if matches!(item_module_ast.body(db), MaybeModuleBody::Some(_)) {
+            // TODO(spapini): Diagnostics in this module that get mapped to parent module
+            // should lie in that module's ModuleData, or be collected by its
+            // diagnostics collector function.
+
+            // If this is an inline module, copy its generation file info from the parent
+            // module, from the file where this submodule was defined.
+            parent_module_data.generated_file_aux_data(db)
+                [&item_module_ast.stable_ptr(db).untyped().file_id(db)]
+                .clone()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let mut file_queue = VecDeque::new();
+    file_queue.push_back(module_file);
+    let mut constants = OrderedHashMap::default();
+    let mut submodules = OrderedHashMap::default();
+    let mut uses = OrderedHashMap::default();
+    let mut free_functions = OrderedHashMap::default();
+    let mut structs = OrderedHashMap::default();
+    let mut enums = OrderedHashMap::default();
+    let mut type_aliases = OrderedHashMap::default();
+    let mut impl_aliases = OrderedHashMap::default();
+    let mut traits = OrderedHashMap::default();
+    let mut impls = OrderedHashMap::default();
+    let mut extern_types = OrderedHashMap::default();
+    let mut extern_functions = OrderedHashMap::default();
+    let mut macro_declarations = OrderedHashMap::default();
+    let mut macro_calls = OrderedHashMap::default();
+    let mut global_uses = OrderedHashMap::default();
+    let mut aux_data = OrderedHashMap::default();
+    let mut files = Vec::new();
+    let mut plugin_diagnostics = Vec::new();
+    let mut diagnostics_notes = OrderedHashMap::default();
 
     let mut items = vec![];
-    res.generated_file_infos.push(main_file_info);
-    while let Some((module_file, item_asts)) = module_queue.pop_front() {
-        let file_index = FileIndex(res.files.len());
-        let module_file_id = ModuleFileId(module_id, file_index);
-        res.files.push(module_file);
+    aux_data.insert(module_file, main_file_aux_data);
+    while let Some(file_id) = file_queue.pop_front() {
+        files.push(file_id);
 
-        for item_ast in item_asts.elements(syntax_db) {
-            let mut remove_original_item = false;
-            // Iterate the plugins by their order. The first one to change something (either
-            // generate new code, remove the original code, or both), breaks the loop. If more
-            // plugins might have act on the item, they can do it on the generated code.
-            for plugin in db.macro_plugins() {
-                let result = plugin.generate_code(db.upcast(), item_ast.clone());
-                for plugin_diag in result.diagnostics {
-                    res.plugin_diagnostics.push((module_file_id, plugin_diag));
-                }
-                if result.remove_original_item {
-                    remove_original_item = true;
-                }
-
-                if let Some(generated) = result.code {
-                    let new_file = db.intern_file(FileLongId::Virtual(VirtualFile {
-                        parent: Some(module_file),
-                        name: generated.name,
-                        content: Arc::new(generated.content),
-                    }));
-                    res.generated_file_infos.push(Some(GeneratedFileInfo {
-                        aux_data: generated.aux_data,
-                        origin: module_file_id,
-                    }));
-                    module_queue.push_back((new_file, db.file_syntax(new_file)?.items(syntax_db)));
-                }
-                if remove_original_item {
-                    break;
-                }
-            }
-            if remove_original_item {
-                // Don't add the original item to the module data.
-                continue;
-            }
-            match item_ast {
-                ast::Item::Constant(constant) => {
-                    let item_id =
-                        db.intern_constant(ConstantLongId(module_file_id, constant.stable_ptr()));
-                    res.constants.insert(item_id, constant);
+        let priv_module_data = module_sub_files(db, module_id, file_id).maybe_as_ref()?;
+        diagnostics_notes
+            .extend(priv_module_data.diagnostics_notes.iter().map(|(k, v)| (*k, v.clone())));
+        file_queue.extend(priv_module_data.files.keys().copied());
+        plugin_diagnostics
+            .extend(priv_module_data.plugin_diagnostics.iter().map(|v| (module_id, v.clone())));
+        aux_data.extend(priv_module_data.aux_data.iter().map(|(k, v)| (*k, v.clone())));
+        for item_ast in &priv_module_data.items {
+            match item_ast.clone() {
+                ast::ModuleItem::Constant(constant) => {
+                    let item_id = ConstantLongId(module_id, constant.stable_ptr(db)).intern(db);
+                    constants.insert(item_id, constant);
                     items.push(ModuleItemId::Constant(item_id));
                 }
-                ast::Item::Module(module) => {
-                    let item_id =
-                        db.intern_submodule(SubmoduleLongId(module_file_id, module.stable_ptr()));
-                    res.submodules.insert(item_id, module);
+                ast::ModuleItem::Module(module) => {
+                    let item_id = SubmoduleLongId(module_id, module.stable_ptr(db)).intern(db);
+                    submodules.insert(item_id, module);
                     items.push(ModuleItemId::Submodule(item_id));
                 }
-                ast::Item::Use(us) => {
-                    let path_leaves = get_all_path_leafs(db.upcast(), us.use_path(syntax_db));
-                    for path_leaf in path_leaves {
-                        let path_leaf_id =
-                            db.intern_use(UseLongId(module_file_id, path_leaf.stable_ptr()));
-                        res.uses.insert(path_leaf_id, path_leaf);
-                        items.push(ModuleItemId::Use(path_leaf_id));
+                ast::ModuleItem::Use(us) => {
+                    for leaf in get_all_path_leaves(db, &us) {
+                        let id = UseLongId(module_id, leaf.stable_ptr(db)).intern(db);
+                        uses.insert(id, leaf);
+                        items.push(ModuleItemId::Use(id));
+                    }
+                    for star in get_all_path_stars(db, &us) {
+                        let id = GlobalUseLongId(module_id, star.stable_ptr(db)).intern(db);
+                        global_uses.insert(id, star);
                     }
                 }
-                ast::Item::FreeFunction(function) => {
-                    let item_id = db.intern_free_function(FreeFunctionLongId(
-                        module_file_id,
-                        function.stable_ptr(),
-                    ));
-                    res.free_functions.insert(item_id, function);
+                ast::ModuleItem::FreeFunction(function) => {
+                    let item_id = FreeFunctionLongId(module_id, function.stable_ptr(db)).intern(db);
+                    free_functions.insert(item_id, function);
                     items.push(ModuleItemId::FreeFunction(item_id));
                 }
-                ast::Item::ExternFunction(extern_function) => {
-                    let item_id = db.intern_extern_function(ExternFunctionLongId(
-                        module_file_id,
-                        extern_function.stable_ptr(),
-                    ));
-                    res.extern_functions.insert(item_id, extern_function);
+                ast::ModuleItem::ExternFunction(extern_function) => {
+                    let item_id =
+                        ExternFunctionLongId(module_id, extern_function.stable_ptr(db)).intern(db);
+                    extern_functions.insert(item_id, extern_function);
                     items.push(ModuleItemId::ExternFunction(item_id));
                 }
-                ast::Item::ExternType(extern_type) => {
-                    let item_id = db.intern_extern_type(ExternTypeLongId(
-                        module_file_id,
-                        extern_type.stable_ptr(),
-                    ));
-                    res.extern_types.insert(item_id, extern_type);
+                ast::ModuleItem::ExternType(extern_type) => {
+                    let item_id =
+                        ExternTypeLongId(module_id, extern_type.stable_ptr(db)).intern(db);
+                    extern_types.insert(item_id, extern_type);
                     items.push(ModuleItemId::ExternType(item_id));
                 }
-                ast::Item::Trait(trt) => {
-                    let item_id = db.intern_trait(TraitLongId(module_file_id, trt.stable_ptr()));
-                    res.traits.insert(item_id, trt);
+                ast::ModuleItem::Trait(trt) => {
+                    let item_id = TraitLongId(module_id, trt.stable_ptr(db)).intern(db);
+                    traits.insert(item_id, trt);
                     items.push(ModuleItemId::Trait(item_id));
                 }
-                ast::Item::Impl(imp) => {
-                    let item_id = db.intern_impl(ImplDefLongId(module_file_id, imp.stable_ptr()));
-                    res.impls.insert(item_id, imp);
+                ast::ModuleItem::Impl(imp) => {
+                    let item_id = ImplDefLongId(module_id, imp.stable_ptr(db)).intern(db);
+                    impls.insert(item_id, imp);
                     items.push(ModuleItemId::Impl(item_id));
                 }
-                ast::Item::Struct(structure) => {
-                    let item_id =
-                        db.intern_struct(StructLongId(module_file_id, structure.stable_ptr()));
-                    res.structs.insert(item_id, structure);
+                ast::ModuleItem::Struct(structure) => {
+                    let item_id = StructLongId(module_id, structure.stable_ptr(db)).intern(db);
+                    structs.insert(item_id, structure);
                     items.push(ModuleItemId::Struct(item_id));
                 }
-                ast::Item::Enum(enm) => {
-                    let item_id = db.intern_enum(EnumLongId(module_file_id, enm.stable_ptr()));
-                    res.enums.insert(item_id, enm);
+                ast::ModuleItem::Enum(enm) => {
+                    let item_id = EnumLongId(module_id, enm.stable_ptr(db)).intern(db);
+                    enums.insert(item_id, enm);
                     items.push(ModuleItemId::Enum(item_id));
                 }
-                ast::Item::TypeAlias(type_alias) => {
-                    let item_id = db.intern_type_alias(TypeAliasLongId(
-                        module_file_id,
-                        type_alias.stable_ptr(),
-                    ));
-                    res.type_aliases.insert(item_id, type_alias);
+                ast::ModuleItem::TypeAlias(type_alias) => {
+                    let item_id =
+                        ModuleTypeAliasLongId(module_id, type_alias.stable_ptr(db)).intern(db);
+                    type_aliases.insert(item_id, type_alias);
                     items.push(ModuleItemId::TypeAlias(item_id));
                 }
-                ast::Item::ImplAlias(impl_alias) => {
-                    let item_id = db.intern_impl_alias(ImplAliasLongId(
-                        module_file_id,
-                        impl_alias.stable_ptr(),
-                    ));
-                    res.impl_aliases.insert(item_id, impl_alias);
+                ast::ModuleItem::ImplAlias(impl_alias) => {
+                    let item_id = ImplAliasLongId(module_id, impl_alias.stable_ptr(db)).intern(db);
+                    impl_aliases.insert(item_id, impl_alias);
                     items.push(ModuleItemId::ImplAlias(item_id));
                 }
-                ast::Item::Missing(_) => {}
+                ast::ModuleItem::MacroDeclaration(macro_declaration) => {
+                    let item_id =
+                        MacroDeclarationLongId(module_id, macro_declaration.stable_ptr(db))
+                            .intern(db);
+                    macro_declarations.insert(item_id, macro_declaration);
+                    items.push(ModuleItemId::MacroDeclaration(item_id));
+                }
+                ast::ModuleItem::InlineMacro(inline_macro_ast) => {
+                    let item_id =
+                        MacroCallLongId(module_id, inline_macro_ast.stable_ptr(db)).intern(db);
+                    macro_calls.insert(item_id, inline_macro_ast.clone());
+                }
+                ast::ModuleItem::HeaderDoc(_) => {}
+                ast::ModuleItem::Missing(_) => {}
             }
         }
     }
-    res.items = items.into();
-    Ok(res)
+    let types_data = ModuleTypesData::new(db, structs, enums, type_aliases, extern_types);
+    let named_items_data = ModuleNamedItemsData::new(
+        db,
+        constants,
+        submodules,
+        uses,
+        free_functions,
+        impl_aliases,
+        traits,
+        impls,
+        extern_functions,
+        macro_declarations,
+    );
+    let unnamed_items_data = ModuleUnnamedItemsData::new(db, global_uses, macro_calls);
+    let files_data =
+        ModuleFilesData::new(db, files, aux_data, plugin_diagnostics, diagnostics_notes);
+    Ok(ModuleData::new(db, items, types_data, named_items_data, unnamed_items_data, files_data))
 }
 
-/// Returns all the path leaves under a given use path.
-pub fn get_all_path_leafs(db: &dyn SyntaxGroup, use_path: ast::UsePath) -> Vec<ast::UsePathLeaf> {
+pub(crate) fn module_data<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<ModuleData<'db>> {
+    priv_module_data_helper(db, (), module_id)
+}
+
+pub type ModuleDataCacheAndLoadingData<'db> =
+    (Arc<OrderedHashMap<ModuleId<'db>, ModuleData<'db>>>, Arc<DefCacheLoadingData<'db>>);
+
+#[salsa::tracked]
+fn cached_crate_modules<'db>(
+    db: &'db dyn Database,
+    crate_id: CrateId<'db>,
+) -> Option<ModuleDataCacheAndLoadingData<'db>> {
+    load_cached_crate_modules(db, crate_id)
+}
+
+pub fn init_external_files<T: DefsGroup>(db: &mut T) {
+    let ext_as_virtual_impl: ExtAsVirtual =
+        Arc::new(|db: &dyn Database, external_id: salsa::Id| ext_as_virtual_impl(db, external_id));
+    files_group_input(db).set_ext_as_virtual_obj(db).to(Some(ext_as_virtual_impl));
+}
+
+/// Returns the `VirtualFile` matching the given external id.
+pub fn ext_as_virtual_impl<'db>(
+    db: &'db dyn Database,
+    external_id: salsa::Id,
+) -> &'db VirtualFile<'db> {
+    let long_id = PluginGeneratedFileId::from_intern_id(external_id).long(db);
+    let file_id = FileLongId::External(external_id).intern(db);
+    let data =
+        module_sub_files(db, long_id.module_id, long_id.stable_ptr.file_id(db)).as_ref().unwrap();
+    &data.files[&file_id]
+}
+
+#[salsa::tracked(returns(ref))]
+/// Returns the information about sub-files generated by the file in the module.
+fn module_sub_files<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+    file_id: FileId<'db>,
+) -> Maybe<PrivModuleSubFiles<'db>> {
+    let module_main_file = db.module_main_file(module_id)?;
+    let file_syntax = db.file_module_syntax(file_id)?;
+    let item_asts = if module_main_file == file_id {
+        if let ModuleId::Submodule(submodule_id) = module_id {
+            let data = submodule_id.module_data(db)?;
+            if let MaybeModuleBody::Some(body) = data.submodules(db)[&submodule_id].body(db) {
+                Some(body.items(db))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+    .unwrap_or_else(|| file_syntax.items(db));
+
+    let crate_id = module_id.owning_crate(db);
+
+    let allowed_attributes = db.allowed_attributes(crate_id);
+    // TODO(orizi): Actually extract the allowed features per module.
+    let allowed_features = Default::default();
+
+    let cfg_set = db
+        .crate_config(crate_id)
+        .and_then(|cfg| cfg.settings.cfg_set.as_ref())
+        .unwrap_or(db.cfg_set());
+    let edition = db
+        .crate_config(module_id.owning_crate(db))
+        .map(|cfg| cfg.settings.edition)
+        .unwrap_or_default();
+    let metadata = MacroPluginMetadata {
+        cfg_set,
+        declared_derives: db.declared_derives(crate_id),
+        allowed_features: &allowed_features,
+        edition,
+    };
+
+    let mut files = OrderedHashMap::<_, _>::default();
+    let mut aux_data = OrderedHashMap::default();
+    let mut items = Vec::new();
+    let mut plugin_diagnostics = Vec::new();
+    let mut diagnostics_notes = OrderedHashMap::default();
+    for item_ast in item_asts.elements(db) {
+        let mut remove_original_item = false;
+        // Iterate through the plugins by their order. The first one to change something (either
+        // generate new code, remove the original code, or both), breaks the loop. If more
+        // plugins might act on the item, they can do it on the generated code.
+        for plugin_id in db.crate_macro_plugins(crate_id).iter() {
+            let plugin = plugin_id.long(db);
+
+            let result = plugin.generate_code(db, item_ast.clone(), &metadata);
+            plugin_diagnostics.extend(result.diagnostics);
+            if result.remove_original_item {
+                remove_original_item = true;
+            }
+
+            if let Some(generated) = result.code {
+                let stable_ptr = item_ast.stable_ptr(db).untyped();
+                let generated_file_id = FileLongId::External(
+                    PluginGeneratedFileLongId {
+                        module_id,
+                        stable_ptr,
+                        name: generated.name.clone(),
+                    }
+                    .intern(db)
+                    .as_intern_id(),
+                )
+                .intern(db);
+                if let Some(text) = generated.diagnostics_note {
+                    diagnostics_notes
+                        .insert(generated_file_id, DiagnosticNote { text, location: None });
+                }
+                files.insert(
+                    generated_file_id,
+                    VirtualFile {
+                        parent: Some(stable_ptr.span_in_file(db)),
+                        name: SmolStrId::from(db, generated.name),
+                        content: SmolStrId::from(db, generated.content),
+                        code_mappings: generated.code_mappings.into(),
+                        kind: FileKind::Module,
+                        original_item_removed: remove_original_item,
+                    },
+                );
+                aux_data.insert(generated_file_id, generated.aux_data);
+            }
+            if remove_original_item {
+                break;
+            }
+        }
+        if remove_original_item {
+            // Don't add the original item to the module data.
+            continue;
+        }
+        validate_attributes(db, allowed_attributes, &item_ast, &mut plugin_diagnostics);
+        items.push(item_ast);
+    }
+    Ok(PrivModuleSubFiles { files, aux_data, items, plugin_diagnostics, diagnostics_notes })
+}
+
+/// Collects attributes allowed by `allow_attr` attribute.
+fn collect_extra_allowed_attributes<'db>(
+    db: &'db dyn Database,
+    item: &impl QueryAttrs<'db>,
+    plugin_diagnostics: &mut Vec<PluginDiagnostic<'db>>,
+) -> OrderedHashSet<SmolStrId<'db>> {
+    let mut extra_allowed_attributes = OrderedHashSet::default();
+    for attr in item.query_attr(db, ALLOW_ATTR_ATTR) {
+        let args = attr.clone().structurize(db).args;
+        if args.is_empty() {
+            plugin_diagnostics.push(PluginDiagnostic::error(
+                attr.stable_ptr(db),
+                "Expected arguments.".to_string(),
+            ));
+            continue;
+        }
+        for arg in args {
+            if let Some(ast::Expr::Path(path)) = try_extract_unnamed_arg(db, &arg.arg)
+                && let Ok(ast::PathSegment::Simple(segment)) =
+                    path.segments(db).elements(db).exactly_one()
+            {
+                extra_allowed_attributes.insert(segment.ident(db).text(db));
+                continue;
+            }
+            plugin_diagnostics.push(PluginDiagnostic::error(
+                arg.arg.stable_ptr(db),
+                "Expected simple identifier.".to_string(),
+            ));
+        }
+    }
+    extra_allowed_attributes
+}
+
+/// Validates that all attributes on the given item are in the allowed set or adds diagnostics.
+pub fn validate_attributes_flat<'db, Item: QueryAttrs<'db> + TypedSyntaxNode<'db>>(
+    db: &'db dyn Database,
+    allowed_attributes: &OrderedHashSet<SmolStrId<'db>>,
+    extra_allowed_attributes: &OrderedHashSet<SmolStrId<'db>>,
+    item: &Item,
+    plugin_diagnostics: &mut Vec<PluginDiagnostic<'db>>,
+) {
+    let local_extra_attributes = collect_extra_allowed_attributes(db, item, plugin_diagnostics);
+    for attr in item.attributes_elements(db) {
+        let attr_text = attr.attr(db).as_syntax_node().get_text_without_trivia(db);
+        if !(allowed_attributes.contains(&attr_text)
+            || extra_allowed_attributes.contains(&attr_text)
+            || local_extra_attributes.contains(&attr_text))
+        {
+            plugin_diagnostics.push(PluginDiagnostic::error(
+                attr.stable_ptr(db),
+                "Unsupported attribute.".to_string(),
+            ));
+        }
+    }
+
+    // Additional semantic validation for `#[path("...")]` attribute.
+    for attr in item.query_attr(db, PATH_ATTR) {
+        let node = item.as_syntax_node();
+        let Some(item_module) = ast::ItemModule::cast(db, node) else {
+            plugin_diagnostics.push(PluginDiagnostic::error(
+                attr.stable_ptr(db),
+                "`#[path(..)]` is only allowed on module declarations.".to_string(),
+            ));
+            continue;
+        };
+        // Must be file-based (`mod name;`), not inline.
+        if matches!(item_module.body(db), MaybeModuleBody::Some(_)) {
+            plugin_diagnostics.push(PluginDiagnostic::error(
+                attr.stable_ptr(db),
+                "`#[path(..)]` requires a file-based module: use `mod name;` with a semicolon."
+                    .to_string(),
+            ));
+            continue;
+        }
+
+        let args = attr.arguments(db);
+        if extract_path_arg(db, &args).is_none() {
+            plugin_diagnostics.push(PluginDiagnostic::error(
+                args.stable_ptr(db),
+                "`#[path(..)]` expects exactly one string literal argument.".to_string(),
+            ));
+        }
+    }
+}
+
+/// Extracts the path argument from the given attribute arguments.
+fn extract_path_arg<'db>(
+    db: &'db dyn Database,
+    args: &ast::OptionArgListParenthesized<'db>,
+) -> Option<ast::TerminalString<'db>> {
+    match args {
+        ast::OptionArgListParenthesized::Empty(_) => None,
+        ast::OptionArgListParenthesized::ArgListParenthesized(args) => {
+            let arg = args.arguments(db).elements(db).exactly_one().ok()?;
+            if let ast::Expr::String(path) = try_extract_unnamed_arg(db, &arg)? {
+                Some(path)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Validates that all attributes on all items in the given element list are in the allowed set or
+/// adds diagnostics.
+fn validate_attributes_element_list<'db, Item: QueryAttrs<'db> + TypedSyntaxNode<'db>>(
+    db: &'db dyn Database,
+    allowed_attributes: &OrderedHashSet<SmolStrId<'db>>,
+    extra_allowed_attributes: &OrderedHashSet<SmolStrId<'db>>,
+    items: impl Iterator<Item = Item>,
+    plugin_diagnostics: &mut Vec<PluginDiagnostic<'db>>,
+) {
+    for item in items {
+        validate_attributes_flat(
+            db,
+            allowed_attributes,
+            extra_allowed_attributes,
+            &item,
+            plugin_diagnostics,
+        );
+    }
+}
+
+/// Validates that all attributes on an item and on items contained within it are in the allowed set
+/// or adds diagnostics.
+fn validate_attributes<'db>(
+    db: &'db dyn Database,
+    allowed_attributes: &OrderedHashSet<SmolStrId<'db>>,
+    item_ast: &ast::ModuleItem<'db>,
+    plugin_diagnostics: &mut Vec<PluginDiagnostic<'db>>,
+) {
+    let extra_allowed_attributes =
+        collect_extra_allowed_attributes(db, item_ast, plugin_diagnostics);
+    validate_attributes_flat(
+        db,
+        allowed_attributes,
+        &extra_allowed_attributes,
+        item_ast,
+        plugin_diagnostics,
+    );
+
+    match item_ast {
+        ast::ModuleItem::Trait(item) => {
+            if let ast::MaybeTraitBody::Some(body) = item.body(db) {
+                validate_attributes_element_list(
+                    db,
+                    allowed_attributes,
+                    &extra_allowed_attributes,
+                    body.items(db).elements(db),
+                    plugin_diagnostics,
+                );
+            }
+        }
+        ast::ModuleItem::Impl(item) => {
+            if let ast::MaybeImplBody::Some(body) = item.body(db) {
+                validate_attributes_element_list(
+                    db,
+                    allowed_attributes,
+                    &extra_allowed_attributes,
+                    body.items(db).elements(db),
+                    plugin_diagnostics,
+                );
+            }
+        }
+        ast::ModuleItem::Struct(item) => {
+            validate_attributes_element_list(
+                db,
+                allowed_attributes,
+                &extra_allowed_attributes,
+                item.members(db).elements(db),
+                plugin_diagnostics,
+            );
+        }
+        ast::ModuleItem::Enum(item) => {
+            validate_attributes_element_list(
+                db,
+                allowed_attributes,
+                &extra_allowed_attributes,
+                item.variants(db).elements(db),
+                plugin_diagnostics,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Returns all the path leaves under a given use item.
+pub fn get_all_path_leaves<'db>(
+    db: &'db dyn Database,
+    use_item: &ast::ItemUse<'db>,
+) -> Vec<ast::UsePathLeaf<'db>> {
     let mut res = vec![];
-    get_all_path_leafs_inner(db, use_path, &mut res);
+    let mut stack = vec![use_item.use_path(db)];
+    while let Some(use_path) = stack.pop() {
+        match use_path {
+            ast::UsePath::Leaf(use_path) => res.push(use_path),
+            ast::UsePath::Single(use_path) => stack.push(use_path.use_path(db)),
+            ast::UsePath::Multi(use_path) => {
+                stack.extend(use_path.use_paths(db).elements(db).rev())
+            }
+            ast::UsePath::Star(_) => {}
+        }
+    }
     res
 }
 
-/// Finds all the path leaves under a given use path and adds them to the given vector.
-fn get_all_path_leafs_inner(
-    db: &dyn SyntaxGroup,
-    use_path: ast::UsePath,
-    res: &mut Vec<ast::UsePathLeaf>,
-) {
-    match use_path {
-        ast::UsePath::Leaf(use_path) => {
-            res.push(use_path);
+/// Returns all the path stars under a given use item.
+pub fn get_all_path_stars<'db>(
+    db: &'db dyn Database,
+    use_item: &ast::ItemUse<'db>,
+) -> Vec<ast::UsePathStar<'db>> {
+    let mut res = vec![];
+    let mut stack = vec![use_item.use_path(db)];
+    while let Some(use_path) = stack.pop() {
+        match use_path {
+            ast::UsePath::Leaf(_) => {}
+            ast::UsePath::Single(use_path) => stack.push(use_path.use_path(db)),
+            ast::UsePath::Multi(use_path) => {
+                stack.extend(use_path.use_paths(db).elements(db).rev())
+            }
+            ast::UsePath::Star(use_path) => res.push(use_path),
         }
-        ast::UsePath::Single(use_path) => get_all_path_leafs_inner(db, use_path.use_path(db), res),
-        ast::UsePath::Multi(use_path) => {
-            for use_path in use_path.use_paths(db).elements(db) {
-                get_all_path_leafs_inner(db, use_path, res);
+    }
+    res
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_constants_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<ConstantId<'db>> {
+    module_data.constants(db).keys().copied().collect_vec()
+}
+
+pub fn module_constants_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [ConstantId<'db>]> {
+    Ok(module_constants_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_constant_by_id<'db>(
+    db: &'db dyn Database,
+    constant_id: ConstantId<'db>,
+) -> Maybe<ast::ItemConstant<'db>> {
+    let module_constants = constant_id.module_data(db)?.constants(db);
+    module_constants.get(&constant_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_submodules_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<SubmoduleId<'db>> {
+    module_data.submodules(db).keys().copied().collect_vec()
+}
+
+fn module_submodules_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [SubmoduleId<'db>]> {
+    Ok(module_submodules_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_submodule_by_id<'db>(
+    db: &'db dyn Database,
+    submodule_id: SubmoduleId<'db>,
+) -> Maybe<ast::ItemModule<'db>> {
+    let module_submodules = submodule_id.module_data(db)?.submodules(db);
+    module_submodules.get(&submodule_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_free_functions_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<FreeFunctionId<'db>> {
+    module_data.free_functions(db).keys().copied().collect_vec()
+}
+
+pub fn module_free_functions_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [FreeFunctionId<'db>]> {
+    Ok(module_free_functions_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_free_function_by_id<'db>(
+    db: &'db dyn Database,
+    free_function_id: FreeFunctionId<'db>,
+) -> Maybe<ast::FunctionWithBody<'db>> {
+    let module_free_functions = free_function_id.module_data(db)?.free_functions(db);
+    module_free_functions.get(&free_function_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_uses_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<UseId<'db>> {
+    module_data.uses(db).keys().copied().collect_vec()
+}
+pub fn module_uses_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [UseId<'db>]> {
+    Ok(module_uses_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_use_by_id<'db>(
+    db: &'db dyn Database,
+    use_id: UseId<'db>,
+) -> Maybe<ast::UsePathLeaf<'db>> {
+    let module_uses = use_id.module_data(db)?.uses(db);
+    module_uses.get(&use_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+/// Returns the `use *` of the given module, by its ID.
+#[salsa::tracked]
+pub fn module_global_use_by_id<'db>(
+    db: &'db dyn Database,
+    global_use_id: GlobalUseId<'db>,
+) -> Maybe<ast::UsePathStar<'db>> {
+    let module_global_uses = global_use_id.module_data(db)?.global_uses(db);
+    module_global_uses.get(&global_use_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_structs_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<StructId<'db>> {
+    module_data.structs(db).keys().copied().collect_vec()
+}
+
+pub fn module_structs_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [StructId<'db>]> {
+    Ok(module_structs_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_struct_by_id<'db>(
+    db: &'db dyn Database,
+    struct_id: StructId<'db>,
+) -> Maybe<ast::ItemStruct<'db>> {
+    let module_structs = struct_id.module_data(db)?.structs(db);
+    module_structs.get(&struct_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_enums_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<EnumId<'db>> {
+    module_data.enums(db).keys().copied().collect_vec()
+}
+
+pub fn module_enums_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [EnumId<'db>]> {
+    Ok(module_enums_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_enum_by_id<'db>(
+    db: &'db dyn Database,
+    enum_id: EnumId<'db>,
+) -> Maybe<ast::ItemEnum<'db>> {
+    let module_enums = enum_id.module_data(db)?.enums(db);
+    module_enums.get(&enum_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_type_aliases_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<ModuleTypeAliasId<'db>> {
+    module_data.type_aliases(db).keys().copied().collect_vec()
+}
+
+pub fn module_type_aliases_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [ModuleTypeAliasId<'db>]> {
+    Ok(module_type_aliases_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_type_alias_by_id<'db>(
+    db: &'db dyn Database,
+    module_type_alias_id: ModuleTypeAliasId<'db>,
+) -> Maybe<ast::ItemTypeAlias<'db>> {
+    let module_type_aliases = module_type_alias_id.module_data(db)?.type_aliases(db);
+    module_type_aliases.get(&module_type_alias_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_impl_aliases_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<ImplAliasId<'db>> {
+    module_data.impl_aliases(db).keys().copied().collect_vec()
+}
+
+pub fn module_impl_aliases_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [ImplAliasId<'db>]> {
+    Ok(module_impl_aliases_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_impl_alias_by_id<'db>(
+    db: &'db dyn Database,
+    impl_alias_id: ImplAliasId<'db>,
+) -> Maybe<ast::ItemImplAlias<'db>> {
+    let module_impl_aliases = impl_alias_id.module_data(db)?.impl_aliases(db);
+    module_impl_aliases.get(&impl_alias_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_traits_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<TraitId<'db>> {
+    module_data.traits(db).keys().copied().collect_vec()
+}
+
+pub fn module_traits_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [TraitId<'db>]> {
+    Ok(module_traits_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_trait_by_id<'db>(
+    db: &'db dyn Database,
+    trait_id: TraitId<'db>,
+) -> Maybe<ast::ItemTrait<'db>> {
+    let module_traits = trait_id.module_data(db)?.traits(db);
+    module_traits.get(&trait_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_impls_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<ImplDefId<'db>> {
+    module_data.impls(db).keys().copied().collect_vec()
+}
+
+pub fn module_impls_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [ImplDefId<'db>]> {
+    Ok(module_impls_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_impl_by_id<'db>(
+    db: &'db dyn Database,
+    impl_def_id: ImplDefId<'db>,
+) -> Maybe<ast::ItemImpl<'db>> {
+    let module_impls = impl_def_id.module_data(db)?.impls(db);
+    module_impls.get(&impl_def_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_extern_types_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<ExternTypeId<'db>> {
+    module_data.extern_types(db).keys().copied().collect_vec()
+}
+pub fn module_extern_types_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [ExternTypeId<'db>]> {
+    Ok(module_extern_types_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_extern_type_by_id<'db>(
+    db: &'db dyn Database,
+    extern_type_id: ExternTypeId<'db>,
+) -> Maybe<ast::ItemExternType<'db>> {
+    let module_extern_types = extern_type_id.module_data(db)?.extern_types(db);
+    module_extern_types.get(&extern_type_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_macro_declarations_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<MacroDeclarationId<'db>> {
+    module_data.macro_declarations(db).keys().copied().collect_vec()
+}
+
+/// Returns all the ids of the macro declarations of the given module.
+pub fn module_macro_declarations_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [MacroDeclarationId<'db>]> {
+    Ok(module_macro_declarations_ids_helper(db, module_id.module_data(db)?))
+}
+
+/// Returns the macro declaration of the given id.
+#[salsa::tracked]
+pub fn module_macro_declaration_by_id<'db>(
+    db: &'db dyn Database,
+    macro_declaration_id: MacroDeclarationId<'db>,
+) -> Maybe<ast::ItemMacroDeclaration<'db>> {
+    let module_macro_declarations = macro_declaration_id.module_data(db)?.macro_declarations(db);
+    module_macro_declarations.get(&macro_declaration_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_macro_calls_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<MacroCallId<'db>> {
+    module_data.macro_calls(db).keys().copied().collect_vec()
+}
+
+pub fn module_macro_calls_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [MacroCallId<'db>]> {
+    Ok(module_macro_calls_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+fn module_macro_call_by_id<'db>(
+    db: &'db dyn Database,
+    macro_call_id: MacroCallId<'db>,
+) -> Maybe<ast::ItemInlineMacro<'db>> {
+    let module_macro_calls = macro_call_id.module_data(db)?.macro_calls(db);
+    module_macro_calls.get(&macro_call_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_extern_functions_ids_helper<'db>(
+    db: &'db dyn Database,
+    module_data: ModuleData<'db>,
+) -> Vec<ExternFunctionId<'db>> {
+    module_data.extern_functions(db).keys().copied().collect_vec()
+}
+
+pub fn module_extern_functions_ids<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+) -> Maybe<&'db [ExternFunctionId<'db>]> {
+    Ok(module_extern_functions_ids_helper(db, module_id.module_data(db)?))
+}
+
+#[salsa::tracked]
+pub fn module_extern_function_by_id<'db>(
+    db: &'db dyn Database,
+    extern_function_id: ExternFunctionId<'db>,
+) -> Maybe<ast::ItemExternFunction<'db>> {
+    let module_extern_functions = extern_function_id.module_data(db)?.extern_functions(db);
+    module_extern_functions.get(&extern_function_id).cloned().ok_or_else(skip_diagnostic)
+}
+
+#[salsa::tracked(returns(ref))]
+fn module_ancestors_helper<'db>(
+    db: &'db dyn Database,
+    _tracked: Tracked,
+    module_id: ModuleId<'db>,
+) -> OrderedHashSet<ModuleId<'db>> {
+    let mut current = module_id;
+    let mut ancestors = OrderedHashSet::default();
+    loop {
+        match current {
+            ModuleId::CrateRoot(_) => {
+                ancestors.insert(current);
+                return ancestors;
+            }
+            ModuleId::Submodule(submodule_id) => {
+                ancestors.insert(current);
+                current = submodule_id.parent_module(db);
+            }
+            ModuleId::MacroCall { id, .. } => {
+                current = id.parent_module(db);
             }
         }
     }
 }
 
-/// Returns all the constant definitions of the given module.
-pub fn module_constants(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<ConstantId, ast::ItemConstant>> {
-    Ok(db.priv_module_data(module_id)?.constants)
-}
-pub fn module_constants_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<ConstantId>> {
-    Ok(db.module_constants(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the *direct* submodules of the given module - including those generated by macro
-/// plugins. To get all the submodules including nested modules, use [`collect_modules_under`].
-fn module_submodules(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<SubmoduleId, ast::ItemModule>> {
-    Ok(db.priv_module_data(module_id)?.submodules)
-}
-fn module_submodules_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<SubmoduleId>> {
-    Ok(db.module_submodules(module_id)?.keys().copied().collect())
+#[salsa::tracked]
+fn module_perceived_module_helper<'db>(
+    db: &'db dyn Database,
+    _tracked: Tracked,
+    mut module_id: ModuleId<'db>,
+) -> ModuleId<'db> {
+    while let ModuleId::MacroCall { id, .. } = module_id {
+        module_id = id.parent_module(db);
+    }
+    module_id
 }
 
-/// Returns all the free functions of the given module.
-pub fn module_free_functions(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<FreeFunctionId, ast::FunctionWithBody>> {
-    Ok(db.priv_module_data(module_id)?.free_functions)
-}
-pub fn module_free_functions_ids(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<Vec<FreeFunctionId>> {
-    Ok(db.module_free_functions(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the uses of the given module.
-pub fn module_uses(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<UseId, ast::UsePathLeaf>> {
-    Ok(db.priv_module_data(module_id)?.uses)
-}
-pub fn module_uses_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<UseId>> {
-    Ok(db.module_uses(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the structs of the given module.
-pub fn module_structs(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<StructId, ast::ItemStruct>> {
-    Ok(db.priv_module_data(module_id)?.structs)
-}
-pub fn module_structs_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<StructId>> {
-    Ok(db.module_structs(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the enums of the given module.
-pub fn module_enums(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<EnumId, ast::ItemEnum>> {
-    Ok(db.priv_module_data(module_id)?.enums)
-}
-pub fn module_enums_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<EnumId>> {
-    Ok(db.module_enums(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the type aliases of the given module.
-pub fn module_type_aliases(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<TypeAliasId, ast::ItemTypeAlias>> {
-    Ok(db.priv_module_data(module_id)?.type_aliases)
-}
-pub fn module_type_aliases_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<TypeAliasId>> {
-    Ok(db.module_type_aliases(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the impl aliases of the given module.
-pub fn module_impl_aliases(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<ImplAliasId, ast::ItemImplAlias>> {
-    Ok(db.priv_module_data(module_id)?.impl_aliases)
-}
-pub fn module_impl_aliases_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<ImplAliasId>> {
-    Ok(db.module_impl_aliases(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the traits of the given module.
-pub fn module_traits(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<TraitId, ast::ItemTrait>> {
-    Ok(db.priv_module_data(module_id)?.traits)
-}
-pub fn module_traits_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<TraitId>> {
-    Ok(db.module_traits(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the impls of the given module.
-pub fn module_impls(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<ImplDefId, ast::ItemImpl>> {
-    Ok(db.priv_module_data(module_id)?.impls)
-}
-pub fn module_impls_ids(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Vec<ImplDefId>> {
-    Ok(db.module_impls(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the extern_types of the given module.
-pub fn module_extern_types(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<ExternTypeId, ast::ItemExternType>> {
-    Ok(db.priv_module_data(module_id)?.extern_types)
-}
-pub fn module_extern_types_ids(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<Vec<ExternTypeId>> {
-    Ok(db.module_extern_types(module_id)?.keys().copied().collect())
-}
-
-/// Returns all the extern_functions of the given module.
-pub fn module_extern_functions(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<OrderedHashMap<ExternFunctionId, ast::ItemExternFunction>> {
-    Ok(db.priv_module_data(module_id)?.extern_functions)
-}
-pub fn module_extern_functions_ids(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<Vec<ExternFunctionId>> {
-    Ok(db.module_extern_functions(module_id)?.keys().copied().collect())
-}
-
-/// Returns the generated_file_infos of the given module.
-pub fn module_generated_file_infos(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<Vec<Option<GeneratedFileInfo>>> {
-    Ok(db.priv_module_data(module_id)?.generated_file_infos)
-}
-
-/// Returns all the plugin diagnostics of the given module.
-pub fn module_plugin_diagnostics(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-) -> Maybe<Vec<(ModuleFileId, PluginDiagnostic)>> {
-    Ok(db.priv_module_data(module_id)?.plugin_diagnostics)
-}
-
-fn module_items(db: &dyn DefsGroup, module_id: ModuleId) -> Maybe<Arc<Vec<ModuleItemId>>> {
-    Ok(db.priv_module_data(module_id)?.items)
-}
-
-fn module_item_name_stable_ptr(
-    db: &dyn DefsGroup,
-    module_id: ModuleId,
-    item_id: ModuleItemId,
-) -> Maybe<SyntaxStablePtrId> {
-    let data = db.priv_module_data(module_id)?;
-    let db = db.upcast();
-    Ok(match item_id {
-        ModuleItemId::Constant(id) => data.constants[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::Submodule(id) => data.submodules[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::Use(id) => {
-            let use_leaf = &data.uses[id];
-            match use_leaf.alias_clause(db) {
-                ast::OptionAliasClause::Empty(_) => use_leaf.ident(db).stable_ptr().untyped(),
-                ast::OptionAliasClause::AliasClause(alias) => {
-                    alias.alias(db).stable_ptr().untyped()
-                }
-            }
-        }
+fn module_item_name_stable_ptr<'db>(
+    db: &'db dyn Database,
+    module_id: ModuleId<'db>,
+    item_id: ModuleItemId<'db>,
+) -> Maybe<SyntaxStablePtrId<'db>> {
+    let data = module_id.module_data(db)?;
+    Ok(match &item_id {
+        ModuleItemId::Constant(id) => data.constants(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::Submodule(id) => data.submodules(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::Use(id) => data.uses(db)[id].name_stable_ptr(db),
         ModuleItemId::FreeFunction(id) => {
-            data.free_functions[id].declaration(db).name(db).stable_ptr().untyped()
+            data.free_functions(db)[id].declaration(db).name(db).stable_ptr(db).untyped()
         }
-        ModuleItemId::Struct(id) => data.structs[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::Enum(id) => data.enums[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::TypeAlias(id) => data.type_aliases[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::ImplAlias(id) => data.impl_aliases[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::Trait(id) => data.traits[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::Impl(id) => data.impls[id].name(db).stable_ptr().untyped(),
-        ModuleItemId::ExternType(id) => data.extern_types[id].name(db).stable_ptr().untyped(),
+        ModuleItemId::Struct(id) => data.structs(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::Enum(id) => data.enums(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::TypeAlias(id) => data.type_aliases(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::ImplAlias(id) => data.impl_aliases(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::Trait(id) => data.traits(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::Impl(id) => data.impls(db)[id].name(db).stable_ptr(db).untyped(),
+        ModuleItemId::ExternType(id) => data.extern_types(db)[id].name(db).stable_ptr(db).untyped(),
         ModuleItemId::ExternFunction(id) => {
-            data.extern_functions[id].declaration(db).name(db).stable_ptr().untyped()
+            data.extern_functions(db)[id].declaration(db).name(db).stable_ptr(db).untyped()
+        }
+        ModuleItemId::MacroDeclaration(id) => {
+            data.macro_declarations(db)[id].name(db).stable_ptr(db).untyped()
         }
     })
 }
+
+pub trait DefsGroupEx: DefsGroup {
+    /// Overrides the default macro plugins available for [`CrateId`] with `plugins`.
+    ///
+    /// *Note*: Sets the following Salsa input: `DefsGroup::macro_plugin_overrides`.
+    fn set_override_crate_macro_plugins<'db>(
+        &'db mut self,
+        crate_id: CrateId<'db>,
+        plugins: Arc<Vec<MacroPluginId<'db>>>,
+    ) {
+        let crate_input = self.crate_input(crate_id);
+        let mut overrides = self.macro_plugin_overrides_input().clone();
+        let plugins = plugins.iter().map(|plugin| plugin.long(self).clone()).collect();
+        overrides.insert(crate_input.clone(), plugins);
+        defs_group_input(self.as_dyn_database())
+            .set_macro_plugin_overrides(self)
+            .to(Some(overrides));
+    }
+
+    /// Overrides the default inline macro plugins available for [`CrateId`] with `plugins`.
+    ///
+    /// *Note*: Sets the following Salsa input: `DefsGroup::inline_macro_plugin_overrides`.
+    fn set_override_crate_inline_macro_plugins<'db>(
+        &'db mut self,
+        crate_id: CrateId<'db>,
+        plugins: Arc<OrderedHashMap<String, InlineMacroExprPluginId<'db>>>,
+    ) {
+        let crate_input = self.crate_input(crate_id);
+        let mut overrides = self.inline_macro_plugin_overrides_input().clone();
+        let plugins = Arc::new(
+            plugins
+                .iter()
+                .map(|(name, plugin)| (name.clone(), plugin.long(self).clone()))
+                .collect(),
+        );
+        overrides.insert(crate_input.clone(), plugins);
+        defs_group_input(self.as_dyn_database())
+            .set_inline_macro_plugin_overrides(self)
+            .to(Some(overrides));
+    }
+}
+
+impl<T: DefsGroup + ?Sized> DefsGroupEx for T {}

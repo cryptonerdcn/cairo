@@ -1,43 +1,42 @@
-use std::fmt::Debug;
-
 use cairo_lang_proc_macros::DebugWithDb;
-use cairo_lang_utils::{define_short_id, Upcast};
-use test_log::test;
+use cairo_lang_test_utils::test;
+use salsa::{Database, Storage};
 
-use crate::debug as cairo_lang_debug;
 use crate::debug::DebugWithDb;
 
 // Test database query group.
-#[salsa::query_group(TestDatabase)]
-trait TestGroup {
-    #[salsa::interned]
-    fn intern_b(&self, crt: DummyLongId) -> DummyShortId;
-}
-// Database impl.
-#[salsa::database(TestDatabase)]
-#[derive(Default)]
-pub struct DatabaseForTesting {
-    storage: salsa::Storage<DatabaseForTesting>,
-}
-impl salsa::Database for DatabaseForTesting {}
+trait TestGroup: salsa::Database {}
 
-impl Upcast<dyn TestGroup> for DatabaseForTesting {
-    fn upcast(&self) -> &(dyn TestGroup + 'static) {
-        self
+impl TestGroup for DummyDb {}
+
+// Structs.
+#[salsa::interned(revisions = usize::MAX)]
+struct Dummy {
+    id: usize,
+}
+
+#[salsa::db]
+#[derive(Clone, Default)]
+struct DummyDb {
+    storage: Storage<Self>,
+}
+
+#[salsa::db]
+impl Database for DummyDb {}
+
+impl<'db> DebugWithDb<'db> for Dummy<'db> {
+    type Db = dyn Database;
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>, db: &'db Self::Db) -> std::fmt::Result {
+        write!(f, "Dummy({})", self.id(db))
     }
 }
 
-// Structs.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct DummyLongId(usize);
-
-define_short_id!(DummyShortId, DummyLongId, TestGroup, lookup_intern_b);
-
 #[derive(DebugWithDb)]
-#[debug_db(dyn TestGroup + 'static)]
-struct ComplexStruct {
+#[debug_db(dyn Database)]
+struct ComplexStruct<'db> {
     a: Option<usize>,
-    b: DummyShortId,
+    b: Dummy<'db>,
     #[hide_field_debug_with_db]
     c: usize,
     #[hide_field_debug_with_db]
@@ -46,7 +45,8 @@ struct ComplexStruct {
 
 #[test]
 fn test_debug() {
-    let db = DatabaseForTesting::default();
-    let a = ComplexStruct { a: Some(5), b: db.intern_b(DummyLongId(6)), c: 7, d: 8 };
-    assert_eq!(format!("{:?}", a.debug(&db)), "ComplexStruct { a: Some(5), b: DummyLongId(6) }");
+    let db = DummyDb::default();
+    let db_ref: &dyn TestGroup = &db;
+    let a = ComplexStruct { a: Some(5), b: Dummy::new(db_ref, 6), c: 7, d: 8 };
+    assert_eq!(format!("{:?}", a.debug(db_ref)), "ComplexStruct { a: Some(5), b: Dummy(6) }");
 }

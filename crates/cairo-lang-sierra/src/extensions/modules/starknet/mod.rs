@@ -1,4 +1,5 @@
 use crate::extensions::lib_func::SignatureSpecializationContext;
+use crate::extensions::starknet::getter::GetExecutionInfoV3Trait;
 use crate::extensions::{NamedType, SpecializationError};
 use crate::ids::{ConcreteTypeId, UserTypeId};
 use crate::program::GenericArg;
@@ -11,7 +12,7 @@ use storage::{
 };
 
 pub mod syscalls;
-use syscalls::{ReplaceClassLibfunc, SystemType};
+use syscalls::{GetClassHashAtLibfunc, ReplaceClassLibfunc, SystemType};
 
 pub mod emit_event;
 use emit_event::EmitEventLibfunc;
@@ -26,9 +27,11 @@ pub mod secp256r1;
 pub mod testing;
 
 pub mod interoperability;
-use interoperability::{CallContractLibfunc, ContractAddressConstLibfunc, ContractAddressType};
+use interoperability::{
+    CallContractLibfunc, ContractAddressConstLibfunc, ContractAddressType, MetaTxV0Libfunc,
+};
 
-use self::getter::{GetExecutionInfoTrait, GetterLibfunc};
+use self::getter::{GetExecutionInfoTrait, GetExecutionInfoV2Trait, GetterLibfunc};
 use self::interoperability::{
     ClassHashConstLibfunc, ClassHashToFelt252Libfunc, ClassHashTryFromFelt252Trait, ClassHashType,
     ContractAddressToFelt252Libfunc, ContractAddressTryFromFelt252Libfunc, DeployLibfunc,
@@ -38,7 +41,10 @@ use self::storage::{
     StorageAddressFromBaseAndOffsetLibfunc, StorageAddressFromBaseLibfunc,
     StorageAddressTryFromFelt252Trait, StorageAddressType, StorageBaseAddressFromFelt252Libfunc,
 };
-use self::syscalls::KeccakLibfunc;
+use self::syscalls::{
+    KeccakLibfunc, Sha256ProcessBlockLibfunc, Sha256StateHandleDigestLibfunc,
+    Sha256StateHandleInitLibfunc, Sha256StateHandleType,
+};
 use self::testing::TestingLibfunc;
 use super::array::ArrayType;
 use super::felt252::Felt252Type;
@@ -48,18 +54,19 @@ use super::structure::StructType;
 use super::try_from_felt252::TryFromFelt252Libfunc;
 
 define_type_hierarchy! {
-    pub enum StarkNetType {
+    pub enum StarknetType {
         ClassHash(ClassHashType),
         ContractAddress(ContractAddressType),
         StorageBaseAddress(StorageBaseAddressType),
         StorageAddress(StorageAddressType),
         System(SystemType),
         Secp256Point(Secp256PointType),
-    }, StarkNetTypeConcrete
+        Sha256StateHandle(Sha256StateHandleType),
+    }, StarknetTypeConcrete
 }
 
 define_libfunc_hierarchy! {
-    pub enum StarkNetLibfunc {
+    pub enum StarknetLibfunc {
          CallContract(CallContractLibfunc),
          ClassHashConst(ClassHashConstLibfunc),
          ClassHashTryFromFelt252(TryFromFelt252Libfunc<ClassHashTryFromFelt252Trait>),
@@ -78,48 +85,53 @@ define_libfunc_hierarchy! {
          EmitEvent(EmitEventLibfunc),
          GetBlockHash(GetBlockHashLibfunc),
          GetExecutionInfo(GetterLibfunc<GetExecutionInfoTrait>),
+         GetExecutionInfoV2(GetterLibfunc<GetExecutionInfoV2Trait>),
+         GetExecutionInfoV3(GetterLibfunc<GetExecutionInfoV3Trait>),
          Deploy(DeployLibfunc),
          Keccak(KeccakLibfunc),
+         Sha256ProcessBlock(Sha256ProcessBlockLibfunc),
+         Sha256StateHandleInit(Sha256StateHandleInitLibfunc),
+         Sha256StateHandleDigest(Sha256StateHandleDigestLibfunc),
          LibraryCall(LibraryCallLibfunc),
          ReplaceClass(ReplaceClassLibfunc),
+         GetClassHashAt(GetClassHashAtLibfunc),
          SendMessageToL1(SendMessageToL1Libfunc),
+         MetaTxV0(MetaTxV0Libfunc),
          Testing(TestingLibfunc),
          Secp256(Secp256Libfunc),
-    }, StarkNetConcreteLibfunc
+    }, StarknetConcreteLibfunc
+}
+
+/// User type for `Span<T>`.
+fn span_ty(
+    context: &dyn SignatureSpecializationContext,
+    wrapped_ty: ConcreteTypeId,
+    wrapped_ty_name: &str,
+) -> Result<ConcreteTypeId, SpecializationError> {
+    context.get_concrete_type(
+        StructType::id(),
+        &[
+            GenericArg::UserType(UserTypeId::from_string(format!(
+                "core::array::Span::<{wrapped_ty_name}>"
+            ))),
+            GenericArg::Type(snapshot_ty(
+                context,
+                context.get_wrapped_concrete_type(ArrayType::id(), wrapped_ty)?,
+            )?),
+        ],
+    )
 }
 
 /// User type for `Span<felt252>`.
 fn felt252_span_ty(
     context: &dyn SignatureSpecializationContext,
 ) -> Result<ConcreteTypeId, SpecializationError> {
-    let felt252_array_ty = context.get_wrapped_concrete_type(
-        ArrayType::id(),
-        context.get_concrete_type(Felt252Type::id(), &[])?,
-    )?;
-    context.get_concrete_type(
-        StructType::id(),
-        &[
-            GenericArg::UserType(UserTypeId::from_string("core::array::Span::<core::felt252>")),
-            GenericArg::Type(snapshot_ty(context, felt252_array_ty)?),
-        ],
-    )
+    span_ty(context, context.get_concrete_type(Felt252Type::id(), &[])?, "core::felt252")
 }
 
 /// User type for `Span<u64>`.
 fn u64_span_ty(
     context: &dyn SignatureSpecializationContext,
 ) -> Result<ConcreteTypeId, SpecializationError> {
-    let u64_array_ty = context.get_wrapped_concrete_type(
-        ArrayType::id(),
-        context.get_concrete_type(Uint64Type::id(), &[])?,
-    )?;
-    context.get_concrete_type(
-        StructType::id(),
-        &[
-            GenericArg::UserType(UserTypeId::from_string(
-                "core::array::Span::<core::integer::u64>",
-            )),
-            GenericArg::Type(snapshot_ty(context, u64_array_ty)?),
-        ],
-    )
+    span_ty(context, context.get_concrete_type(Uint64Type::id(), &[])?, "core::integer::u64")
 }

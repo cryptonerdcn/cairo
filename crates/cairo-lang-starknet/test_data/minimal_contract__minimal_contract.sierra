@@ -1,0 +1,128 @@
+type RangeCheck = RangeCheck [storable: true, drop: false, dup: false, zero_sized: false];
+type core::panics::Panic = Struct<ut@[640126984585624630990013944782631102820301644699864366139839615702772668018]> [storable: true, drop: true, dup: true, zero_sized: true];
+type Const<felt252, 375233589013918064796019> = Const<felt252, 375233589013918064796019> [storable: false, drop: false, dup: false, zero_sized: false];
+type Const<felt252, 7733229381460288120802334208475838166080759535023995805565484692595> = Const<felt252, 7733229381460288120802334208475838166080759535023995805565484692595> [storable: false, drop: false, dup: false, zero_sized: false];
+type Array<felt252> = Array<felt252> [storable: true, drop: true, dup: false, zero_sized: false];
+type Snapshot<Array<felt252>> = Snapshot<Array<felt252>> [storable: true, drop: true, dup: true, zero_sized: false];
+type core::array::Span::<core::felt252> = Struct<ut@[782572820229152792105145177694740816763001980856532159945905090893343825762], Snapshot<Array<felt252>>> [storable: true, drop: true, dup: true, zero_sized: false];
+type Tuple<core::array::Span::<core::felt252>> = Struct<ut@[1325343513152088812341467750635149026053683136611136091911357178651207272643], core::array::Span::<core::felt252>> [storable: true, drop: true, dup: true, zero_sized: false];
+type BuiltinCosts = BuiltinCosts [storable: true, drop: true, dup: true, zero_sized: false];
+type System = System [storable: true, drop: false, dup: false, zero_sized: false];
+type Tuple<core::panics::Panic, Array<felt252>> = Struct<ut@[1325343513152088812341467750635149026053683136611136091911357178651207272643], core::panics::Panic, Array<felt252>> [storable: true, drop: true, dup: false, zero_sized: false];
+type core::panics::PanicResult::<(core::array::Span::<core::felt252>,)> = Enum<ut@[270671131472959732993844072583327084608513343873724697777364695367457417702], Tuple<core::array::Span::<core::felt252>>, Tuple<core::panics::Panic, Array<felt252>>> [storable: true, drop: true, dup: false, zero_sized: false];
+type felt252 = felt252 [storable: true, drop: true, dup: true, zero_sized: false];
+type Box<felt252> = Box<felt252> [storable: true, drop: true, dup: true, zero_sized: false];
+type GasBuiltin = GasBuiltin [storable: true, drop: false, dup: false, zero_sized: false];
+
+libfunc revoke_ap_tracking = revoke_ap_tracking;
+libfunc withdraw_gas = withdraw_gas;
+libfunc branch_align = branch_align;
+libfunc struct_deconstruct<core::array::Span::<core::felt252>> = struct_deconstruct<core::array::Span::<core::felt252>>;
+libfunc array_snapshot_pop_front<felt252> = array_snapshot_pop_front<felt252>;
+libfunc drop<Snapshot<Array<felt252>>> = drop<Snapshot<Array<felt252>>>;
+libfunc drop<Box<felt252>> = drop<Box<felt252>>;
+libfunc function_call<user@core::panic_with_const_felt252::<7733229381460288120802334208475838166080759535023995805565484692595>> = function_call<user@core::panic_with_const_felt252::<7733229381460288120802334208475838166080759535023995805565484692595>>;
+libfunc enum_init<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>, 1> = enum_init<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>, 1>;
+libfunc store_temp<RangeCheck> = store_temp<RangeCheck>;
+libfunc store_temp<GasBuiltin> = store_temp<GasBuiltin>;
+libfunc store_temp<System> = store_temp<System>;
+libfunc store_temp<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>> = store_temp<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>>;
+libfunc get_builtin_costs = get_builtin_costs;
+libfunc store_temp<BuiltinCosts> = store_temp<BuiltinCosts>;
+libfunc withdraw_gas_all = withdraw_gas_all;
+libfunc redeposit_gas = redeposit_gas;
+libfunc array_new<felt252> = array_new<felt252>;
+libfunc snapshot_take<Array<felt252>> = snapshot_take<Array<felt252>>;
+libfunc drop<Array<felt252>> = drop<Array<felt252>>;
+libfunc struct_construct<core::array::Span::<core::felt252>> = struct_construct<core::array::Span::<core::felt252>>;
+libfunc struct_construct<Tuple<core::array::Span::<core::felt252>>> = struct_construct<Tuple<core::array::Span::<core::felt252>>>;
+libfunc enum_init<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>, 0> = enum_init<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>, 0>;
+libfunc jump = jump;
+libfunc drop<core::array::Span::<core::felt252>> = drop<core::array::Span::<core::felt252>>;
+libfunc function_call<user@core::panic_with_const_felt252::<375233589013918064796019>> = function_call<user@core::panic_with_const_felt252::<375233589013918064796019>>;
+libfunc const_as_immediate<Const<felt252, 7733229381460288120802334208475838166080759535023995805565484692595>> = const_as_immediate<Const<felt252, 7733229381460288120802334208475838166080759535023995805565484692595>>;
+libfunc store_temp<felt252> = store_temp<felt252>;
+libfunc function_call<user@core::panic_with_felt252> = function_call<user@core::panic_with_felt252>;
+libfunc const_as_immediate<Const<felt252, 375233589013918064796019>> = const_as_immediate<Const<felt252, 375233589013918064796019>>;
+libfunc array_append<felt252> = array_append<felt252>;
+libfunc struct_construct<core::panics::Panic> = struct_construct<core::panics::Panic>;
+libfunc struct_construct<Tuple<core::panics::Panic, Array<felt252>>> = struct_construct<Tuple<core::panics::Panic, Array<felt252>>>;
+libfunc store_temp<Tuple<core::panics::Panic, Array<felt252>>> = store_temp<Tuple<core::panics::Panic, Array<felt252>>>;
+
+F0:
+revoke_ap_tracking() -> ();
+withdraw_gas([0], [1]) { fallthrough([4], [5]) F0_B2([6], [7]) };
+branch_align() -> ();
+struct_deconstruct<core::array::Span::<core::felt252>>([3]) -> ([8]);
+array_snapshot_pop_front<felt252>([8]) { fallthrough([9], [10]) F0_B0([11]) };
+branch_align() -> ();
+drop<Snapshot<Array<felt252>>>([9]) -> ();
+drop<Box<felt252>>([10]) -> ();
+function_call<user@core::panic_with_const_felt252::<7733229381460288120802334208475838166080759535023995805565484692595>>() -> ([12]);
+enum_init<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>, 1>([12]) -> ([13]);
+store_temp<RangeCheck>([4]) -> ([4]);
+store_temp<GasBuiltin>([5]) -> ([5]);
+store_temp<System>([2]) -> ([2]);
+store_temp<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>>([13]) -> ([13]);
+return([4], [5], [2], [13]);
+F0_B0:
+branch_align() -> ();
+drop<Snapshot<Array<felt252>>>([11]) -> ();
+get_builtin_costs() -> ([14]);
+store_temp<BuiltinCosts>([14]) -> ([14]);
+withdraw_gas_all([4], [5], [14]) { fallthrough([15], [16]) F0_B1([17], [18]) };
+branch_align() -> ();
+redeposit_gas([16]) -> ([19]);
+array_new<felt252>() -> ([20]);
+snapshot_take<Array<felt252>>([20]) -> ([21], [22]);
+drop<Array<felt252>>([21]) -> ();
+struct_construct<core::array::Span::<core::felt252>>([22]) -> ([23]);
+struct_construct<Tuple<core::array::Span::<core::felt252>>>([23]) -> ([24]);
+enum_init<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>, 0>([24]) -> ([25]);
+store_temp<RangeCheck>([15]) -> ([15]);
+store_temp<GasBuiltin>([19]) -> ([19]);
+store_temp<System>([2]) -> ([2]);
+store_temp<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>>([25]) -> ([25]);
+return([15], [19], [2], [25]);
+F0_B1:
+branch_align() -> ();
+redeposit_gas([18]) -> ([26]);
+store_temp<RangeCheck>([17]) -> ([27]);
+store_temp<GasBuiltin>([26]) -> ([28]);
+jump() { F0_B3() };
+F0_B2:
+branch_align() -> ();
+drop<core::array::Span::<core::felt252>>([3]) -> ();
+redeposit_gas([7]) -> ([29]);
+store_temp<RangeCheck>([6]) -> ([27]);
+store_temp<GasBuiltin>([29]) -> ([28]);
+F0_B3:
+function_call<user@core::panic_with_const_felt252::<375233589013918064796019>>() -> ([30]);
+enum_init<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>, 1>([30]) -> ([31]);
+store_temp<RangeCheck>([27]) -> ([27]);
+store_temp<GasBuiltin>([28]) -> ([28]);
+store_temp<System>([2]) -> ([2]);
+store_temp<core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>>([31]) -> ([31]);
+return([27], [28], [2], [31]);
+F1:
+const_as_immediate<Const<felt252, 7733229381460288120802334208475838166080759535023995805565484692595>>() -> ([0]);
+store_temp<felt252>([0]) -> ([0]);
+function_call<user@core::panic_with_felt252>([0]) -> ([1]);
+return([1]);
+F2:
+const_as_immediate<Const<felt252, 375233589013918064796019>>() -> ([0]);
+store_temp<felt252>([0]) -> ([0]);
+function_call<user@core::panic_with_felt252>([0]) -> ([1]);
+return([1]);
+F3:
+array_new<felt252>() -> ([1]);
+array_append<felt252>([1], [0]) -> ([2]);
+struct_construct<core::panics::Panic>() -> ([3]);
+struct_construct<Tuple<core::panics::Panic, Array<felt252>>>([3], [2]) -> ([4]);
+store_temp<Tuple<core::panics::Panic, Array<felt252>>>([4]) -> ([4]);
+return([4]);
+
+cairo_level_tests::contracts::minimal_contract::minimal_contract::__wrapper__empty@F0([0]: RangeCheck, [1]: GasBuiltin, [2]: System, [3]: core::array::Span::<core::felt252>) -> (RangeCheck, GasBuiltin, System, core::panics::PanicResult::<(core::array::Span::<core::felt252>,)>);
+core::panic_with_const_felt252::<7733229381460288120802334208475838166080759535023995805565484692595>@F1() -> (Tuple<core::panics::Panic, Array<felt252>>);
+core::panic_with_const_felt252::<375233589013918064796019>@F2() -> (Tuple<core::panics::Panic, Array<felt252>>);
+core::panic_with_felt252@F3([0]: felt252) -> (Tuple<core::panics::Panic, Array<felt252>>);

@@ -1,9 +1,9 @@
 //! > Test panic.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(x: felt252) {
     bar(@x)
 }
@@ -24,23 +24,22 @@ blk0 (root):
 Statements:
   (v1: core::felt252, v2: @core::felt252) <- snapshot(v0)
   () <- test::bar(v2)
-  (v3: ()) <- struct_construct()
 End:
-  Return(v3)
+  Return()
 
 //! > ==========================================================================
 
 //! > Test struct snapshot.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
-fn foo(orig: @A) -> @A{
-  bar(orig.a, orig.b);
-  let A {a, b} = orig;
-  bar(a, b);
-  orig
+//! > function_code
+fn foo(orig: @A) -> @A {
+    bar(orig.a, orig.b);
+    let A { a, b } = orig;
+    bar(a, b);
+    orig
 }
 
 //! > function_name
@@ -48,11 +47,11 @@ foo
 
 //! > module_code
 struct A {
-    a: Array::<felt252>,
+    a: Array<felt252>,
     b: felt252,
 }
-fn bar(a: @Array::<felt252>, b: @felt252) {
-}
+#[inline(never)]
+fn bar(a: @Array::<felt252>, b: @felt252) {}
 
 //! > semantic_diagnostics
 
@@ -63,10 +62,8 @@ Parameters: v0: @test::A
 blk0 (root):
 Statements:
   (v1: @core::array::Array::<core::felt252>, v2: @core::felt252) <- struct_destructure(v0)
-  (v3: @core::array::Array::<core::felt252>, v4: @core::felt252) <- struct_destructure(v0)
-  (v5: ()) <- test::bar(v1, v4)
-  (v6: @core::array::Array::<core::felt252>, v7: @core::felt252) <- struct_destructure(v0)
-  (v8: ()) <- test::bar(v6, v7)
+  () <- test::bar(v1, v2)
+  () <- test::bar(v1, v2)
 End:
   Return(v0)
 
@@ -75,16 +72,16 @@ End:
 //! > Test enum snapshot.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(orig: @A) -> @A {
-  match orig {
-    A::A(a) => bar0(a),
-    A::B(b) => bar1(b),
-    A::C((c, d)) => bar2(c, d),
-  }
-  orig
+    match orig {
+        A::A(a) => bar0(a),
+        A::B(b) => bar1(b),
+        A::C((c, d)) => bar2(c, d),
+    }
+    orig
 }
 
 //! > function_name
@@ -92,16 +89,16 @@ foo
 
 //! > module_code
 enum A {
-    A: Array::<felt252>,
+    A: Array<felt252>,
     B: felt252,
     C: (felt252, Array::<felt252>),
 }
-fn bar0(a: @Array::<felt252>) {
-}
-fn bar1(b: @felt252) {
-}
-fn bar2(c: @felt252, d: @Array::<felt252>) {
-}
+#[inline(never)]
+fn bar0(a: @Array::<felt252>) {}
+#[inline(never)]
+fn bar1(b: @felt252) {}
+#[inline(never)]
+fn bar2(c: @felt252, d: @Array::<felt252>) {}
 
 //! > semantic_diagnostics
 
@@ -114,31 +111,26 @@ Statements:
 End:
   Match(match_enum(v0) {
     A::A(v1) => blk1,
-    A::B(v3) => blk2,
-    A::C(v5) => blk3,
+    A::B(v2) => blk2,
+    A::C(v3) => blk3,
   })
 
 blk1:
 Statements:
-  (v2: ()) <- test::bar0(v1)
+  () <- test::bar0(v1)
 End:
-  Goto(blk4, {})
+  Return(v0)
 
 blk2:
 Statements:
-  (v4: ()) <- test::bar1(v3)
+  () <- test::bar1(v2)
 End:
-  Goto(blk4, {})
+  Return(v0)
 
 blk3:
 Statements:
-  (v6: @core::felt252, v7: @core::array::Array::<core::felt252>) <- struct_destructure(v5)
-  (v8: ()) <- test::bar2(v6, v7)
-End:
-  Goto(blk4, {})
-
-blk4:
-Statements:
+  (v4: @core::felt252, v5: @core::array::Array::<core::felt252>) <- struct_destructure(v3)
+  () <- test::bar2(v4, v5)
 End:
   Return(v0)
 
@@ -147,17 +139,15 @@ End:
 //! > Test felt252 desnap.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(value: @felt252) -> felt252 {
-  *value
+    *value
 }
 
 //! > function_name
 foo
-
-//! > module_code
 
 //! > semantic_diagnostics
 
@@ -176,40 +166,39 @@ End:
 //! > Test array desnap.
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: true)
 
-//! > function
-fn foo(value: @Array::<felt252>) -> Array::<felt252> {
-  *value
+//! > function_code
+fn foo(value: @Array::<felt252>) -> Array<felt252> {
+    *value
 }
 
 //! > function_name
 foo
 
-//! > module_code
-
 //! > semantic_diagnostics
 
 //! > lowering_diagnostics
-error: Cannot desnap a non copyable type. Trait has no implementation in context: core::traits::Copy::<core::array::Array::<core::felt252>>
- --> lib.cairo:2:3
-  *value
-  ^****^
+error[E3003]: Cannot desnap a non copyable type.
+ --> lib.cairo:2:5
+    *value
+    ^^^^^^
+note: Trait has no implementation in context: core::traits::Copy::<core::array::Array::<core::felt252>>.
 
 //! > lowering_flat
-Parameters: v0: @core::array::Array::<core::felt252>
+<Failed lowering function - run with RUST_LOG=warn (or less) to see diagnostics>
 
 //! > ==========================================================================
 
 //! > Test member snapshot
 
 //! > test_runner_name
-test_function_lowering
+test_function_lowering(expect_diagnostics: false)
 
-//! > function
+//! > function_code
 fn foo(a: A) -> usize {
-  bar(@a.b);
-  a.b
+    bar(@a.b);
+    a.b
 }
 
 //! > function_name
@@ -217,7 +206,7 @@ foo
 
 //! > module_code
 struct A {
-  b: usize,
+    b: usize,
 }
 extern fn bar(x: @usize) nopanic;
 
@@ -234,3 +223,281 @@ Statements:
   () <- test::bar(v3)
 End:
   Return(v2)
+
+//! > ==========================================================================
+
+//! > Test snapshot invalidation full var.
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo() -> usize {
+    let mut array: Array<u32> = array![14];
+    let mut i = 0;
+
+    while i < array.len() {
+        i += 1;
+    }
+
+    array.pop_front().unwrap();
+
+    array.len()
+}
+
+//! > function_name
+foo
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: core::RangeCheck, v1: core::gas::GasBuiltin
+blk0 (root):
+Statements:
+  (v2: core::RangeCheck, v3: core::gas::GasBuiltin, v4: core::panics::PanicResult::<(core::integer::u32, ())>) <- test::foo[83-134]{0, @array![14], }(v0, v1)
+End:
+  Match(match_enum(v4) {
+    PanicResult::Ok(v5) => blk1,
+    PanicResult::Err(v6) => blk4,
+  })
+
+blk1:
+Statements:
+  (v7: core::array::Array::<core::integer::u32>) <- core::array::array_new::<core::integer::u32>()
+  (v8: core::integer::u32) <- 14
+  (v9: core::array::Array::<core::integer::u32>) <- core::array::array_append::<core::integer::u32>(v7, v8)
+End:
+  Match(match core::array::array_pop_front::<core::integer::u32>(v9) {
+    Option::Some(v10, v11) => blk2,
+    Option::None(v12) => blk3,
+  })
+
+blk2:
+Statements:
+  (v13: core::gas::GasBuiltin) <- core::gas::redeposit_gas(v3)
+  (v14: core::array::Array::<core::integer::u32>, v15: @core::array::Array::<core::integer::u32>) <- snapshot(v10)
+  (v16: core::integer::u32) <- core::array::array_len::<core::integer::u32>(v15)
+  (v17: (core::integer::u32,)) <- struct_construct(v16)
+  (v18: core::panics::PanicResult::<(core::integer::u32,)>) <- PanicResult::Ok(v17)
+End:
+  Return(v2, v13, v18)
+
+blk3:
+Statements:
+  (v19: (core::panics::Panic, core::array::Array::<core::felt252>)) <- core::panic_with_const_felt252::<29721761890975875353235833581453094220424382983267374>()
+  (v20: core::panics::PanicResult::<(core::integer::u32,)>) <- PanicResult::Err(v19)
+End:
+  Return(v2, v3, v20)
+
+blk4:
+Statements:
+  (v21: core::panics::PanicResult::<(core::integer::u32,)>) <- PanicResult::Err(v6)
+End:
+  Return(v2, v3, v21)
+
+//! > ==========================================================================
+
+//! > Test snapshot invalidation partial var.
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo() -> @u8 {
+    let mut a = A { b: 8 };
+    loop {
+        let _v = @(a.b);
+        break;
+    }
+    a = A { b: 7 };
+
+    @(a.b)
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Drop)]
+struct A {
+    b: u8,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters:
+blk0 (root):
+Statements:
+  (v0: core::integer::u8) <- 7
+  (v1: core::integer::u8, v2: @core::integer::u8) <- snapshot(v0)
+End:
+  Return(v2)
+
+//! > ==========================================================================
+
+//! > Test snapshot use same snapshot inner loop.
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo() {
+    let a = A { b: 7 };
+    loop {
+        let _ = @a;
+        loop {
+            let _ = @a;
+            break;
+        }
+        break;
+    }
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Drop)]
+struct A {
+    b: u8,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters:
+blk0 (root):
+Statements:
+End:
+  Return()
+
+//! > ==========================================================================
+
+//! > Test snapshot of overridden member.
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo() -> @A {
+    let mut a = A { m: 7 };
+    let _z = @a;
+    a.m = 0;
+    @a
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Copy, Drop)]
+struct A {
+    m: u8,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters:
+blk0 (root):
+Statements:
+  (v0: core::integer::u8) <- 0
+  (v1: test::A) <- struct_construct(v0)
+  (v2: test::A, v3: @test::A) <- snapshot(v1)
+End:
+  Return(v3)
+
+//! > ==========================================================================
+
+//! > Test snapshot of overridden parent.
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > function_code
+fn foo() -> @u8 {
+    let mut a = A { m: Member { m: 7 } };
+    let _z = @a.m.m;
+    a.m = Member { m: 0 };
+    @a.m.m
+}
+
+//! > function_name
+foo
+
+//! > module_code
+#[derive(Copy, Drop)]
+struct A {
+    m: Member,
+}
+
+#[derive(Copy, Drop)]
+struct Member {
+    m: u8,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters:
+blk0 (root):
+Statements:
+  (v0: core::integer::u8) <- 0
+  (v1: core::integer::u8, v2: @core::integer::u8) <- snapshot(v0)
+End:
+  Return(v2)
+
+//! > ==========================================================================
+
+//! > Test struct snapshot auto member access desnap.
+
+//! > test_runner_name
+test_function_lowering(expect_diagnostics: false)
+
+//! > crate_settings
+edition = "2025_12"
+
+//! > function_code
+fn foo(
+    a: @A,
+) -> (@Array<felt252>, @Array<felt252>, @@Array<felt252>, felt252, @felt252, @felt252, @@felt252) {
+    (@a.a, @(@a).a, @@(@a).a, a.b, @a.b, @(@a).b, @@(@a).b)
+}
+
+//! > function_name
+foo
+
+//! > module_code
+struct A {
+    a: Array<felt252>,
+    b: felt252,
+}
+
+//! > semantic_diagnostics
+
+//! > lowering_diagnostics
+
+//! > lowering_flat
+Parameters: v0: @test::A
+blk0 (root):
+Statements:
+  (v1: @test::A, v2: @@test::A) <- snapshot(v0)
+  (v3: @@core::array::Array::<core::felt252>, v4: @@core::felt252) <- struct_destructure(v2)
+  (v5: @core::array::Array::<core::felt252>, v6: @core::felt252) <- struct_destructure(v0)
+  (v7: @core::array::Array::<core::felt252>) <- desnap(v3)
+  (v8: core::felt252) <- desnap(v6)
+  (v9: @core::felt252) <- desnap(v4)
+  (v10: (@core::array::Array::<core::felt252>, @core::array::Array::<core::felt252>, @@core::array::Array::<core::felt252>, core::felt252, @core::felt252, @core::felt252, @@core::felt252)) <- struct_construct(v5, v7, v3, v8, v6, v9, v4)
+End:
+  Return(v10)

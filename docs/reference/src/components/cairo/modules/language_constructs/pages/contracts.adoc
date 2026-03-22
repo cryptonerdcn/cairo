@@ -1,10 +1,12 @@
+:cairo-repo: https://github.com/starkware-libs/cairo/blob/main
+
 = Contracts
 
 Starknet contracts can be written in Cairo.
 
 == Example
 
-[source,rust]
+[source,cairo]
 ----
 #[starknet::contract]
 mod my_contract {
@@ -13,7 +15,7 @@ mod my_contract {
         m: LegacyMap::<felt252, u128>,
     }
 
-    #[external]
+    #[external(v0)]
     fn foo(value: felt252) -> felt252 {
         let y = x::read() + value;
         m::write(y, 3_u128);
@@ -24,20 +26,20 @@ mod my_contract {
 
 A contract is written as an inline module, with designated attributes.
 
-The main attribute is the `#[starknet::contract]` attribute that makes the starknet plugin treat the module as
-a contract.
+The main attribute is the `#[starknet::contract]` attribute that makes the Starknet plugin treat the
+module as a contract.
 
 == Storage
 
 
-Unlike a Cairo program, which is stateless, a Starknet contract has a state, called “the contract’s
-storage”.
+Unlike a Cairo program, which is stateless, a Starknet contract has a state, called "the contract’s
+storage".
 Transactions invoked on such contracts may modify this state.
 
 In a contract, you can define a struct named `Storage`. The members of this struct are the storage
 variables.
-The storage variables may be of any Cairo type that implements the `StorageAccess` trait, and legacy
-mappings that store key-value pairs.
+The storage variables may be of any Cairo type that implements the `starknet::Store` trait, and
+legacy mappings that store key-value pairs.
 
 Accessing a storage member is done using the `::read()` and `::write(value)` functions which are
 automatically created by the Starknet plugin.
@@ -45,8 +47,11 @@ For example, for the storage member `x` above, access is done using `x::read()` 
 `x::write(value)`.
 
 Defining a mapping storage member is done using the `LegacyMap` "type" that is expanded by
-the Starknet plugin. The keys must implement the `LegacyHash` trait and the values must implement
-the `StorageAccess` trait.
+the Starknet plugin. The keys must implement the `Hash` trait and the values must implement the
+`starknet::Store` trait.
+Note that `LegacyMap` is a deprecated alias for `starknet::storage::Map`. For new contracts you
+should use `starknet::storage::Map` directly. The example above still uses `LegacyMap` for
+backward compatibility.
 Accessing such storage members is done using the `::read(key)` and
 `::write(key, value)` functions which are also automatically created by the Starknet plugin.
 For example, for the storage member `m` above, access is done using `m::read(key)` and
@@ -60,10 +65,10 @@ When a contract is deployed, all of its storage variables are default-initialize
 Starknet contracts have no main() function. Instead, each function may be annotated as a special
 function using one of the attributes below:
 
-- `#[external]` functions may be called by Starknet users or by other contracts. For example:
-[source]
+- `#[external(v0)]` functions may be called by Starknet users or by other contracts. For example:
+[source,cairo]
 ----
-    #[external]
+    #[external(v0)]
     fn external_example(ref self: ContractState, value: felt252) {
         x::write(value);
     }
@@ -71,26 +76,26 @@ function using one of the attributes below:
 Note the first parameter. It represents the state of the contract storage.
 The `ref` modifier means that the state may change - by writing to storage, for example.
 Another possibility is to get a read-only reference to the storage:
-[source]
+[source,cairo]
 ----
-    #[external]
+    #[external(v0)]
     fn view_example(self: @ContractState) -> felt252 {
-        x::read(value)
+        x::read()
     }
 ----
 This is a view function - it can only read from the storage.
 - `#[constructor]` function is called when the contract is deployed. There may be only one such
-function. If it is not defined, the contract is deployed with all storage variables
-default-initialized. For example:
-[source]
+function and it must be called `constructor`. If it is not defined, the contract is deployed with
+all storage variables default-initialized. For example:
+[source,cairo]
 ----
     #[constructor]
-    fn constructor_example() {
+    fn constructor() {
         x::write(3);
     }
 ----
 - `#[l1_handler]` functions are called when the contract receives a message from L1. For example:
-[source]
+[source,cairo]
 ----
     #[l1_handler]
     fn l1_handler_example(from_address: felt252) {
@@ -100,7 +105,7 @@ default-initialized. For example:
 ----
 - Functions without any of the above attributes are private functions, and may only be called by
 other functions in the same contract. They are not entry points. For example:
-[source]
+[source,cairo]
 ----
     fn private_helper_add(a: felt252, b: felt252) -> felt252 {
         a + b
@@ -109,14 +114,48 @@ other functions in the same contract. They are not entry points. For example:
 
 == Events
 
-Contract events trigger events on Starknet. They can be triggered by the contract.
+Events allow contracts to emit structured data to the blockchain that can be monitored by off-chain applications.
 
-The are defined using the `#[event]` attribute on an empty function.
+Events are defined by creating an `enum` named `Event` annotated with `#[event]`.
+Each variant represents a different event type and must be a struct deriving `starknet::Event`.
+
 For example:
-[source]
+[source,cairo]
 ----
+    #[derive(Drop, starknet::Event)]
+    pub struct MyEvent {
+        pub value: u128,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct MyOtherEvent {
+        pub other_value: u128,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub enum MyAnotherEvent {
+        MyOtherEvent: MyOtherEvent,
+    }
+
     #[event]
-    fn event_example(event_data: felt252) {}
+    #[derive(Drop, starknet::Event)]
+    pub enum Event {
+        MyEvent: MyEvent,
+        #[flat]
+        AnotherEvent: MyAnotherEvent,
+    }
+----
+
+The `\#[flat]` attribute is used to merge the variants of `MyAnotherEvent` into `Event`,
+enforcing unique selectors across both. Without `#[flat]`, the event would be nested.
+
+Events are emitted using `self.emit()`:
+[source,cairo]
+----
+    #[external(v0)]
+    fn trigger_event(ref self: ContractState, value: u128) {
+        self.emit(Event::MyEvent(MyEvent { value }));
+    }
 ----
 
 == ABI
@@ -124,7 +163,7 @@ For example:
 Each contract has an ABI (Application Binary Interface) that defines:
 
 - The entry points that can be called on it, of the kinds mentioned above.
-- The types in the entry points signatures.
+- The types in the entry point signatures.
 - The contract's events.
 
 
@@ -136,17 +175,13 @@ You can also write a contract interface manually, for contracts that are not imp
 your code.
 
 For example, the contract interface for `my_contract` above can be manually written as:
-[source,rust]
+[source,cairo]
 ----
 #[starknet::interface]
 trait IMyContract {
-    #[external]
     fn foo(value: felt252) -> felt252;
 }
 ----
-
-Note that the same `\#[external]`/`#[external]`/`#[event]` attributes must be used in the contract
-interface as in an implemented contract.
 
 === Using the Contract Interface Dispatcher
 
@@ -157,20 +192,19 @@ That is, for every contract you implement or contract interface you manually add
 You can use another contract interface contract-dispatcher to call another contract
 in the following way:
 
-[source,rust]
+[source,cairo]
 ----
 #[starknet::interface]
 trait IMyContract<TContractState> {
-    #[external]
     fn foo(ref self: TContractState, value: felt252) -> felt252;
 }
 
 #[starknet::contract]
-mod MySecondContract {
+mod my_second_contract {
     use super::IMyContractDispatcherTrait;
     use super::IMyContractDispatcher;
 
-    #[external]
+    #[external(v0)]
     fn call_foo(
         another_contract_address: starknet::ContractAddress,
         a: felt252
@@ -187,20 +221,19 @@ You can also call a function from another contract class as a library function.
 This means the function's logic is executed from the caller contract's context.
 This can be done using the library-dispatcher in the following way:
 
-[source,rust]
+[source,cairo]
 ----
 #[starknet::interface]
 trait IMyContract {
-    #[external]
     fn foo(value: felt252);
 }
 
 #[starknet::contract]
-mod MySecondContract {
+mod my_second_contract {
     use super::IMyContractDispatcherTrait;
     use super::IMyContractLibraryDispatcher;
 
-    #[external]
+    #[external(v0)]
     fn libcall_foo(a: felt252) -> felt252 {
         IMyContractLibraryDispatcher { class_hash: starknet::class_hash_const::<0x1234>() }.foo(a)
     }
@@ -211,30 +244,33 @@ Where `0x1234` is the `ClassHash` of the contract class implementing `foo`.
 
 === Using system calls
 
-Another way to call another contract is to use the `starknet::call_contract_syscall` system call.
-The dispatcher described above is the high-level syntax for the low-level system calls.
+Another way to call another contract is to use the `starknet::syscalls::call_contract_syscall`
+system call. The dispatcher described above is the high-level syntax for the low-level system calls.
 Thus, prefer using the dispatcher method.
 You can use the system call directly if you want to have customized error handling or more
 control over the serialization/deserialization of the call data and the returned data.
 
-To directly call another contract using `starknet::call_contract_syscall` you can do the following,
-but the result is the serialized return value of the function which you need to deserialize
-yourself. You also need to compute the selector of the function you want to call, which is the
+To directly call another contract using `starknet::syscalls::call_contract_syscall` you can do the
+following, but the result is the serialized return value of the function which you need to
+deserialize yourself.
+You also need to compute the selector of the function you want to call, which is the
 keccak hash of the function name - in this case `starknet_keccak("foo")`.
 
-[source,rust]
+[source,cairo]
 ----
 #[starknet::contract]
-mod MySecondContract {
-    #[external]
+mod my_second_contract {
+    #[external(v0)]
     fn syscall_call_another_contract(
         address: starknet::ContractAddress, selector: felt252, calldata: Array<felt252>
-    ) -> Span::<felt252> {
-        starknet::call_contract_syscall(
+    ) -> Span<felt252> {
+        starknet::syscalls::call_contract_syscall(
             :address, entry_point_selector: selector, calldata: calldata.span()
         ).unwrap_syscall()
     }
 }
 ----
 
-// TODO(yuval): add links to compilation, abi format, declaring/deployment from hello_starknet.
+- xref:../../getting_started/pages/compiling-starknet-contracts.adoc[Compiling Starknet Contracts] — Learn how to compile contracts to Sierra and CASM
+- xref:../../language_semantics/pages/application-binary-interface.adoc[Application Binary Interface] — Contract ABI format and serialization
+- link:{cairo-repo}/crates/cairo-lang-starknet/cairo_level_tests/contracts/hello_starknet.cairo[hello_starknet.cairo] — Complete example contract

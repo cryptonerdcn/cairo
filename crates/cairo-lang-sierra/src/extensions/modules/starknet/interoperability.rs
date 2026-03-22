@@ -24,7 +24,7 @@ impl NoGenericArgsGenericType for ContractAddressType {
     const ZERO_SIZED: bool = false;
 }
 
-/// Libfunc for creating a constant storage address.
+/// Libfunc for creating a constant contract address.
 #[derive(Default)]
 pub struct ContractAddressConstLibfuncWrapped {}
 impl ConstGenLibfunc for ContractAddressConstLibfuncWrapped {
@@ -139,7 +139,7 @@ impl SyscallGenericLibfunc for CallContractLibfunc {
     }
 }
 
-/// Libfunc for a deploying a declared class system call.
+/// Libfunc for deploying a declared class system call.
 #[derive(Default)]
 pub struct DeployLibfunc {}
 impl SyscallGenericLibfunc for DeployLibfunc {
@@ -217,5 +217,34 @@ impl SyscallGenericLibfunc for SendMessageToL1Libfunc {
         _context: &dyn SignatureSpecializationContext,
     ) -> Result<Vec<crate::ids::ConcreteTypeId>, SpecializationError> {
         Ok(vec![])
+    }
+}
+
+/// Libfunc for the `meta_tx_v0` system call.
+#[derive(Default)]
+pub struct MetaTxV0Libfunc {}
+impl SyscallGenericLibfunc for MetaTxV0Libfunc {
+    const STR_ID: &'static str = "meta_tx_v0_syscall";
+
+    fn input_tys(
+        context: &dyn SignatureSpecializationContext,
+    ) -> Result<Vec<crate::ids::ConcreteTypeId>, SpecializationError> {
+        let felt252_span_ty = felt252_span_ty(context)?;
+        Ok(vec![
+            // Address.
+            context.get_concrete_type(ContractAddressType::id(), &[])?,
+            // Entry point selector.
+            context.get_concrete_type(Felt252Type::id(), &[])?,
+            // Call data.
+            felt252_span_ty.clone(),
+            // Signature.
+            felt252_span_ty,
+        ])
+    }
+
+    fn success_output_tys(
+        context: &dyn SignatureSpecializationContext,
+    ) -> Result<Vec<crate::ids::ConcreteTypeId>, SpecializationError> {
+        Ok(vec![felt252_span_ty(context)?])
     }
 }

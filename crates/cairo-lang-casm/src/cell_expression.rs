@@ -13,7 +13,18 @@ pub enum CellOperator {
     Div,
 }
 
-/// The expression representing a cell in the casm memory.
+impl core::fmt::Display for CellOperator {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            CellOperator::Add => write!(f, "+"),
+            CellOperator::Sub => write!(f, "-"),
+            CellOperator::Mul => write!(f, "*"),
+            CellOperator::Div => write!(f, "/"),
+        }
+    }
+}
+
+/// The expression representing a cell in the CASM memory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CellExpression {
     Deref(CellRef),
@@ -61,14 +72,14 @@ impl CellExpression {
     }
 
     /// Given `[ref] + offset` returns `([ref], offset)`.
-    pub fn to_deref_with_offset(&self) -> Option<(CellRef, i16)> {
+    pub fn to_deref_with_offset(&self) -> Option<(CellRef, i32)> {
         match self {
-            CellExpression::Deref(cell) => Some((*cell, 0i16)),
+            CellExpression::Deref(cell) => Some((*cell, 0)),
             CellExpression::BinOp {
                 op: CellOperator::Add,
                 a: cell,
                 b: DerefOrImmediate::Immediate(offset),
-            } => Some((*cell, offset.value.to_i16()?)),
+            } => Some((*cell, offset.value.to_i32()?)),
             _ => None,
         }
     }
@@ -77,7 +88,7 @@ impl CellExpression {
     /// written as an instruction offset.
     pub fn to_buffer(&self, required_slack: i16) -> Option<CellExpression> {
         let (base, offset) = self.to_deref_with_offset()?;
-        offset.checked_add(required_slack)?;
+        offset.to_i16()?.checked_add(required_slack)?;
         if offset == 0 {
             Some(CellExpression::Deref(base))
         } else {
@@ -88,24 +99,32 @@ impl CellExpression {
             })
         }
     }
+
+    /// Returns a cell expression which is the sum of `cell` and `value`.
+    /// If the value is zero, returns the cell itself.
+    pub fn add_with_const(cell: CellRef, value: i16) -> CellExpression {
+        if value == 0 {
+            CellExpression::Deref(cell)
+        } else {
+            CellExpression::BinOp {
+                op: CellOperator::Add,
+                a: cell,
+                b: DerefOrImmediate::Immediate(value.into()),
+            }
+        }
+    }
 }
 
 impl ApplyApChange for CellExpression {
-    fn apply_known_ap_change(self, ap_change: usize) -> Option<Self> {
-        Some(match self {
-            CellExpression::Deref(operand) => {
-                CellExpression::Deref(operand.apply_known_ap_change(ap_change)?)
+    fn apply_known_ap_change(&mut self, ap_change: usize) -> bool {
+        match self {
+            CellExpression::Deref(operand) => operand.apply_known_ap_change(ap_change),
+            CellExpression::DoubleDeref(operand, _) => operand.apply_known_ap_change(ap_change),
+            CellExpression::BinOp { op: _, a, b } => {
+                a.apply_known_ap_change(ap_change) && b.apply_known_ap_change(ap_change)
             }
-            CellExpression::DoubleDeref(operand, offset) => {
-                CellExpression::DoubleDeref(operand.apply_known_ap_change(ap_change)?, offset)
-            }
-            CellExpression::BinOp { op, a, b } => CellExpression::BinOp {
-                op,
-                a: a.apply_known_ap_change(ap_change)?,
-                b: b.apply_known_ap_change(ap_change)?,
-            },
-            expr @ CellExpression::Immediate(_) => expr,
-        })
+            CellExpression::Immediate(_) => true,
+        }
     }
 
     fn can_apply_unknown(&self) -> bool {
@@ -115,6 +134,17 @@ impl ApplyApChange for CellExpression {
             }
             CellExpression::Immediate(_) => true,
             CellExpression::BinOp { a, b, .. } => a.can_apply_unknown() && b.can_apply_unknown(),
+        }
+    }
+}
+
+impl core::fmt::Display for CellExpression {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            CellExpression::Deref(cell) => write!(f, "{cell}"),
+            CellExpression::DoubleDeref(cell, offset) => write!(f, "[{cell} + {offset}]"),
+            CellExpression::Immediate(imm) => write!(f, "{imm}"),
+            CellExpression::BinOp { op, a, b } => write!(f, "{a} {op} {b}"),
         }
     }
 }

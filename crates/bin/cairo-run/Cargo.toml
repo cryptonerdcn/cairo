@@ -9,13 +9,14 @@ description = "Runner executable for the Cairo programming language"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+mimalloc = { workspace = true, optional = true }
 
-cairo-lang-runner = { path = "../../cairo-lang-runner", version = "2.0.0-rc2" }
-cairo-lang-starknet = { path = "../../cairo-lang-starknet", version = "2.0.0-rc2" }
-cairo-lang-diagnostics = { path = "../../cairo-lang-diagnostics", version = "2.0.0-rc2" }
-cairo-lang-sierra = { path = "../../cairo-lang-sierra", version = "2.0.0-rc2" }
-cairo-lang-sierra-generator = { path = "../../cairo-lang-sierra-generator", version = "2.0.0-rc2" }
-cairo-lang-compiler = { path = "../../cairo-lang-compiler", version = "2.0.0-rc2" }
-cairo-lang-utils = { path = "../../cairo-lang-utils", version = "2.0.0-rc2", features = [
-    "env_logger",
-] }
+cairo-lang-compiler = { path = "../../cairo-lang-compiler", version = "=2.16.0" }
+cairo-lang-diagnostics = { path = "../../cairo-lang-diagnostics", version = "=2.16.0" }
+cairo-lang-filesystem = { path = "../../cairo-lang-filesystem", version = "=2.16.0" }
+cairo-lang-runner = { path = "../../cairo-lang-runner", version = "=2.16.0" }
+cairo-lang-sierra-generator = { path = "../../cairo-lang-sierra-generator", version = "=2.16.0" }
+cairo-lang-starknet = { path = "../../cairo-lang-starknet", version = "=2.16.0" }
+
+[features]
+mimalloc = ["dep:mimalloc"]

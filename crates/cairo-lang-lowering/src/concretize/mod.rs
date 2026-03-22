@@ -1,43 +1,49 @@
 use cairo_lang_diagnostics::Maybe;
-use cairo_lang_semantic::substitution::{
-    GenericSubstitution, SemanticRewriter, SubstitutionRewriter,
-};
+use cairo_lang_semantic::substitution::GenericSubstitution;
+use cairo_lang_semantic::types::TypeInfo;
+use cairo_lang_utils::Intern;
+use salsa::Database;
 
-use crate::db::LoweringGroup;
-use crate::ids::{FunctionId, FunctionLongId, GeneratedFunction};
-use crate::{FlatBlockEnd, FlatLowered, MatchArm, Statement};
+use crate::ids::{FunctionId, FunctionLongId, GeneratedFunction, SemanticFunctionIdEx};
+use crate::{BlockEnd, Lowered, MatchArm, Statement};
 
-/// Rewrites a [FunctionId] with a [SubstitutionRewriter].
-fn concretize_function(
-    db: &dyn LoweringGroup,
-    rewriter: &mut SubstitutionRewriter<'_>,
-    function: FunctionId,
-) -> Maybe<FunctionId> {
-    let long_id = match db.lookup_intern_lowering_function(function) {
-        FunctionLongId::Semantic(id) => FunctionLongId::Semantic(rewriter.rewrite(id)?),
-        FunctionLongId::Generated(GeneratedFunction { parent, element }) => {
-            FunctionLongId::Generated(GeneratedFunction {
-                parent: rewriter.rewrite(parent)?,
-                element,
-            })
+/// Rewrites a [FunctionId] with a [GenericSubstitution].
+fn concretize_function<'db>(
+    db: &'db dyn Database,
+    substitution: &GenericSubstitution<'db>,
+    function: FunctionId<'db>,
+) -> Maybe<FunctionId<'db>> {
+    match function.long(db) {
+        FunctionLongId::Semantic(id) => {
+            // We call `lowered` here in case the function will be substituted to a generated one.
+            Ok(substitution.substitute(db, *id)?.lowered(db))
         }
-    };
-    Ok(db.intern_lowering_function(long_id))
+        FunctionLongId::Generated(GeneratedFunction { parent, key }) => {
+            Ok(FunctionLongId::Generated(GeneratedFunction {
+                parent: substitution.substitute(db, *parent)?,
+                key: *key,
+            })
+            .intern(db))
+        }
+        FunctionLongId::Specialized(_) => {
+            unreachable!("Specialization of functions only occurs post concretization.")
+        }
+    }
 }
 
 /// Concretizes a lowered generic function by applying a generic parameter substitution on its
 /// variable types, variants and called functions.
-pub fn concretize_lowered(
-    db: &dyn LoweringGroup,
-    lowered: &mut FlatLowered,
-    substitution: &GenericSubstitution,
+pub fn concretize_lowered<'db>(
+    db: &'db dyn Database,
+    lowered: &mut Lowered<'db>,
+    substitution: &GenericSubstitution<'db>,
 ) -> Maybe<()> {
-    let mut rewriter = SubstitutionRewriter { db: db.upcast(), substitution };
     // Substitute all types.
     for (_, var) in lowered.variables.iter_mut() {
-        var.ty = rewriter.rewrite(var.ty)?;
-        if let Ok(impl_id) = &mut var.destruct_impl {
-            *impl_id = rewriter.rewrite(*impl_id)?;
+        var.ty = substitution.substitute(db, var.ty)?;
+        let TypeInfo { destruct_impl, panic_destruct_impl, .. } = &mut var.info;
+        for impl_id in [destruct_impl, panic_destruct_impl].into_iter().flatten() {
+            *impl_id = substitution.substitute(db, *impl_id)?;
         }
     }
     // Substitute all statements.
@@ -45,35 +51,36 @@ pub fn concretize_lowered(
         for stmt in block.statements.iter_mut() {
             match stmt {
                 Statement::Call(stmt) => {
-                    stmt.function = concretize_function(db, &mut rewriter, stmt.function)?;
+                    stmt.function = concretize_function(db, substitution, stmt.function)?;
                 }
                 Statement::EnumConstruct(stmt) => {
-                    stmt.variant = rewriter.rewrite(stmt.variant.clone())?;
+                    stmt.variant = substitution.substitute(db, stmt.variant)?;
+                }
+                Statement::Const(stmt) => {
+                    stmt.value = substitution.substitute(db, stmt.value)?;
                 }
                 Statement::Snapshot(_)
                 | Statement::Desnap(_)
-                | Statement::Literal(_)
                 | Statement::StructConstruct(_)
-                | Statement::StructDestructure(_) => {}
+                | Statement::StructDestructure(_)
+                | Statement::IntoBox(_)
+                | Statement::Unbox(_) => {}
             }
         }
-        if let FlatBlockEnd::Match { info } = &mut block.end {
-            match info {
-                crate::MatchInfo::Enum(s) => {
-                    for MatchArm { variant_id, .. } in s.arms.iter_mut() {
-                        *variant_id = rewriter.rewrite(variant_id.clone())?;
-                    }
-                }
+        if let BlockEnd::Match { info } = &mut block.end {
+            for MatchArm { arm_selector: selector, .. } in match info {
+                crate::MatchInfo::Enum(s) => s.arms.iter_mut(),
                 crate::MatchInfo::Extern(s) => {
-                    s.function = concretize_function(db, &mut rewriter, s.function)?;
-                    for MatchArm { variant_id, .. } in s.arms.iter_mut() {
-                        *variant_id = rewriter.rewrite(variant_id.clone())?;
-                    }
+                    s.function = concretize_function(db, substitution, s.function)?;
+                    s.arms.iter_mut()
                 }
+                crate::MatchInfo::Value(s) => s.arms.iter_mut(),
+            } {
+                *selector = substitution.substitute(db, selector.clone())?;
             }
         }
     }
-    lowered.signature = rewriter.rewrite(lowered.signature.clone())?;
+    lowered.signature = substitution.substitute(db, lowered.signature.clone())?;
 
     Ok(())
 }

@@ -6,26 +6,25 @@ repository.workspace = true
 license-file.workspace = true
 description = "Cairo core plugin implementations."
 
+[features]
+testing = []
+
 [dependencies]
-cairo-lang-defs = { path = "../cairo-lang-defs", version = "2.0.0-rc2" }
-cairo-lang-diagnostics = { path = "../cairo-lang-diagnostics", version = "2.0.0-rc2" }
-cairo-lang-filesystem = { path = "../cairo-lang-filesystem", version = "2.0.0-rc2" }
-cairo-lang-parser = { path = "../cairo-lang-parser", version = "2.0.0-rc2" }
-cairo-lang-semantic = { path = "../cairo-lang-semantic", version = "2.0.0-rc2" }
-cairo-lang-syntax = { path = "../cairo-lang-syntax", version = "2.0.0-rc2" }
-cairo-lang-utils = { path = "../cairo-lang-utils", version = "2.0.0-rc2" }
+cairo-lang-defs = { path = "../cairo-lang-defs", version = "=2.16.0" }
+cairo-lang-diagnostics = { path = "../cairo-lang-diagnostics", version = "=2.16.0" }
+cairo-lang-filesystem = { path = "../cairo-lang-filesystem", version = "=2.16.0" }
+cairo-lang-parser = { path = "../cairo-lang-parser", version = "=2.16.0" }
+cairo-lang-syntax = { path = "../cairo-lang-syntax", version = "=2.16.0" }
+cairo-lang-utils = { path = "../cairo-lang-utils", version = "=2.16.0", features = ["tracing"] }
+indent.workspace = true
 indoc.workspace = true
-itertools.workspace = true
-num-bigint.workspace = true
+itertools = { workspace = true, default-features = true }
 salsa.workspace = true
-smol_str.workspace = true
 
 [dev-dependencies]
-cairo-lang-debug = { path = "../cairo-lang-debug", version = "2.0.0-rc2" }
-cairo-lang-parser = { path = "../cairo-lang-parser", version = "2.0.0-rc2" }
-cairo-lang-test-utils = { path = "../cairo-lang-test-utils", version = "2.0.0-rc2" }
-env_logger.workspace = true
+cairo-lang-debug = { path = "../cairo-lang-debug" }
+cairo-lang-parser = { path = "../cairo-lang-parser" }
+cairo-lang-test-utils = { path = "../cairo-lang-test-utils", features = ["testing"] }
 indoc.workspace = true
 serde_json.workspace = true
-test-case.workspace = true
-test-log.workspace = true
+tracing.workspace = true

@@ -1,15 +1,18 @@
+#[cfg(not(feature = "std"))]
+use alloc::string::ToString;
+
+use cairo_lang_test_utils::test;
 use indoc::indoc;
 use itertools::join;
 use pretty_assertions::assert_eq;
-use test_log::test;
 
 use crate::instructions::Instruction;
-use crate::{casm, deref};
+use crate::{casm, cell_ref};
 
 #[test]
 fn test_assert() {
     let x = 1;
-    let y = deref!([fp + 5]);
+    let y = cell_ref!([fp + 5]);
     let z = 5;
 
     let ctx = casm! {

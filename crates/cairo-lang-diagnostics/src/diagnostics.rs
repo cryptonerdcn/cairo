@@ -1,51 +1,142 @@
+use std::fmt;
+use std::hash::Hash;
+use std::sync::Arc;
+
+use cairo_lang_debug::debug::DebugWithDb;
+use cairo_lang_filesystem::db::get_originating_location;
+use cairo_lang_filesystem::ids::{FileId, SpanInFile};
+use cairo_lang_proc_macros::HeapSize;
+use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
+use itertools::Itertools;
+use salsa::Database;
+
+use crate::error_code::{ErrorCode, OptionErrorCodeExt};
+
 #[cfg(test)]
 #[path = "diagnostics_test.rs"]
 mod test;
 
-use std::sync::Arc;
-
-use cairo_lang_filesystem::db::FilesGroup;
-use cairo_lang_filesystem::ids::FileId;
-use cairo_lang_filesystem::span::TextSpan;
-use cairo_lang_utils::Upcast;
-use itertools::Itertools;
-
-use crate::location_marks::get_location_marks;
+/// The severity of a diagnostic.
+#[derive(Eq, PartialEq, Hash, Ord, PartialOrd, Clone, Copy, Debug)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+impl fmt::Display for Severity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Severity::Error => write!(f, "error"),
+            Severity::Warning => write!(f, "warning"),
+        }
+    }
+}
 
 /// A trait for diagnostics (i.e., errors and warnings) across the compiler.
 /// Meant to be implemented by each module that may produce diagnostics.
-pub trait DiagnosticEntry: Clone + std::fmt::Debug + Eq + std::hash::Hash {
-    type DbType: Upcast<dyn FilesGroup> + ?Sized;
-    fn format(&self, db: &Self::DbType) -> String;
-    fn location(&self, db: &Self::DbType) -> DiagnosticLocation;
-    // TODO(spapini): Add a way to inspect the diagnostic programmatically, e.g, downcast.
+pub trait DiagnosticEntry<'db>: Clone + fmt::Debug + Eq + Hash {
+    fn format(&self, db: &'db dyn Database) -> String;
+    fn location(&self, db: &'db dyn Database) -> SpanInFile<'db>;
+    fn notes(&self, _db: &'db dyn Database) -> &[DiagnosticNote<'_>] {
+        &[]
+    }
+    fn severity(&self) -> Severity {
+        Severity::Error
+    }
+    fn error_code(&self) -> Option<ErrorCode> {
+        None
+    }
+    /// Returns true if the two should be regarded as the same kind when filtering duplicate
+    /// diagnostics.
+    fn is_same_kind(&self, other: &Self) -> bool;
 }
-pub struct DiagnosticLocation {
-    pub file_id: FileId,
-    pub span: TextSpan,
+
+/// Diagnostic notes for diagnostics originating in the plugin generated files identified by
+/// [`FileId`].
+pub type PluginFileDiagnosticNotes<'a> = OrderedHashMap<FileId<'a>, DiagnosticNote<'a>>;
+
+// Helper trait to get the user location with plugin notes.
+pub trait UserLocationWithPluginNotes<'db> {
+    /// Gets the location of the originating user code,
+    /// along with [`DiagnosticNote`]s for this translation.
+    /// The notes are collected from the parent files of the originating location.
+    fn user_location_with_plugin_notes(
+        &self,
+        db: &'db dyn Database,
+        file_notes: &PluginFileDiagnosticNotes<'db>,
+    ) -> (SpanInFile<'db>, Vec<DiagnosticNote<'db>>);
 }
-impl DiagnosticLocation {
-    /// Get the location of right after this diagnostic's location (with width 0).
-    pub fn after(&self) -> Self {
-        Self { file_id: self.file_id, span: self.span.after() }
+impl<'db> UserLocationWithPluginNotes<'db> for SpanInFile<'db> {
+    fn user_location_with_plugin_notes(
+        &self,
+        db: &'db dyn Database,
+        file_notes: &PluginFileDiagnosticNotes<'db>,
+    ) -> (SpanInFile<'db>, Vec<DiagnosticNote<'db>>) {
+        let mut parent_files = Vec::new();
+        let origin = get_originating_location(db, *self, Some(&mut parent_files));
+        let diagnostic_notes = parent_files
+            .into_iter()
+            .rev()
+            .filter_map(|file_id| file_notes.get(&file_id).cloned())
+            .collect_vec();
+        (origin, diagnostic_notes)
+    }
+}
+
+/// A note about a diagnostic.
+/// May include a relevant diagnostic location.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, HeapSize, salsa::Update)]
+pub struct DiagnosticNote<'a> {
+    pub text: String,
+    pub location: Option<SpanInFile<'a>>,
+}
+impl<'a> DiagnosticNote<'a> {
+    pub fn text_only(text: String) -> Self {
+        Self { text, location: None }
+    }
+
+    pub fn with_location(text: String, location: SpanInFile<'a>) -> Self {
+        Self { text, location: Some(location) }
+    }
+}
+
+impl<'a> DebugWithDb<'a> for DiagnosticNote<'a> {
+    type Db = dyn Database;
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, db: &'a dyn Database) -> fmt::Result {
+        write!(f, "{}", self.text)?;
+        if let Some(location) = &self.location {
+            write!(f, ":\n  --> ")?;
+            location.user_location(db).fmt(f, db)?;
+        }
+        Ok(())
     }
 }
 
 /// This struct is used to ensure that when an error occurs, a diagnostic is properly reported.
 ///
-/// It must not be constructed directly. Instead it is returned by [DiagnosticsBuilder::add]
+/// It must not be constructed directly. Instead, it is returned by [DiagnosticsBuilder::add]
 /// when a diagnostic is reported.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, HeapSize, salsa::Update)]
 pub struct DiagnosticAdded;
 
 pub fn skip_diagnostic() -> DiagnosticAdded {
     // TODO(lior): Consider adding a log here.
-    DiagnosticAdded::default()
+    DiagnosticAdded
 }
 
 /// Represents an arbitrary type T or a missing output due to an error whose diagnostic was properly
 /// reported.
 pub type Maybe<T> = Result<T, DiagnosticAdded>;
+
+/// Trait to convert a `Maybe<T>` to a `Maybe<&T>`.
+pub trait MaybeAsRef<T> {
+    fn maybe_as_ref(&self) -> Maybe<&T>;
+}
+
+impl<T> MaybeAsRef<T> for Maybe<T> {
+    fn maybe_as_ref(&self) -> Maybe<&T> {
+        self.as_ref().map_err(|e| *e)
+    }
+}
 
 /// Temporary trait to allow conversions from the old `Option<T>` mechanism to `Maybe<T>`.
 // TODO(lior): Remove this trait after converting all the functions.
@@ -62,7 +153,8 @@ impl<T> ToMaybe<T> for Option<T> {
 }
 
 /// Temporary trait to allow conversions from `Maybe<T>` to `Option<T>`.
-/// The behavior is identical to [Result::ok]. It is used to mark all the location where there
+///
+/// The behavior is identical to [Result::ok]. It is used to mark all the locations where there
 /// is a conversion between the two mechanisms.
 // TODO(lior): Remove this trait after converting all the functions.
 pub trait ToOption<T> {
@@ -75,100 +167,179 @@ impl<T> ToOption<T> for Maybe<T> {
 }
 
 /// A builder for Diagnostics, accumulating multiple diagnostic entries.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct DiagnosticsBuilder<TEntry: DiagnosticEntry> {
-    pub count: usize,
+#[derive(Clone, Debug, Eq, Hash, PartialEq, salsa::Update)]
+pub struct DiagnosticsBuilder<'db, TEntry: DiagnosticEntry<'db> + salsa::Update> {
+    pub error_count: usize,
     pub leaves: Vec<TEntry>,
-    pub subtrees: Vec<Diagnostics<TEntry>>,
+    pub subtrees: Vec<Diagnostics<'db, TEntry>>,
+    _marker: std::marker::PhantomData<&'db ()>,
 }
-impl<TEntry: DiagnosticEntry> DiagnosticsBuilder<TEntry> {
-    pub fn new() -> Self {
-        Self { leaves: Default::default(), subtrees: Default::default(), count: 0 }
-    }
+impl<'db, TEntry: DiagnosticEntry<'db> + salsa::Update> DiagnosticsBuilder<'db, TEntry> {
     pub fn add(&mut self, diagnostic: TEntry) -> DiagnosticAdded {
+        if diagnostic.severity() == Severity::Error {
+            self.error_count += 1;
+        }
         self.leaves.push(diagnostic);
-        self.count += 1;
-        DiagnosticAdded::default()
+        DiagnosticAdded
     }
-    pub fn extend(&mut self, diagnostics: Diagnostics<TEntry>) {
-        self.count += diagnostics.len();
+    pub fn extend(&mut self, diagnostics: Diagnostics<'db, TEntry>) {
+        self.error_count += diagnostics.0.error_count;
         self.subtrees.push(diagnostics);
     }
-    pub fn build(self) -> Diagnostics<TEntry> {
-        Diagnostics(Arc::new(self))
+    pub fn build(self) -> Diagnostics<'db, TEntry> {
+        Diagnostics(self.into())
     }
 }
-
-impl<TEntry: DiagnosticEntry> Default for DiagnosticsBuilder<TEntry> {
+impl<'db, TEntry: DiagnosticEntry<'db> + salsa::Update> From<Diagnostics<'db, TEntry>>
+    for DiagnosticsBuilder<'db, TEntry>
+{
+    fn from(diagnostics: Diagnostics<'db, TEntry>) -> Self {
+        let mut new_self = Self::default();
+        new_self.extend(diagnostics);
+        new_self
+    }
+}
+impl<'db, TEntry: DiagnosticEntry<'db> + salsa::Update> Default
+    for DiagnosticsBuilder<'db, TEntry>
+{
     fn default() -> Self {
-        Self::new()
+        Self {
+            leaves: Default::default(),
+            subtrees: Default::default(),
+            error_count: 0,
+            _marker: Default::default(),
+        }
     }
 }
 
-pub fn format_diagnostics(
-    db: &dyn FilesGroup,
-    message: &str,
-    location: DiagnosticLocation,
-) -> String {
-    let file_name = location.file_id.file_name(db);
-    let marks = get_location_marks(db, &location);
-    let pos = match location.span.start.position_in_file(db, location.file_id) {
-        Some(pos) => format!("{}:{}", pos.line + 1, pos.col + 1),
-        None => "?".into(),
-    };
-    format!("error: {message}\n --> {file_name}:{pos}\n{marks}\n")
+pub fn format_diagnostics(db: &dyn Database, message: &str, location: SpanInFile<'_>) -> String {
+    format!("{message}\n --> {:?}\n", location.debug(db))
+}
+
+#[derive(Debug)]
+pub struct FormattedDiagnosticEntry {
+    severity: Severity,
+    error_code: Option<ErrorCode>,
+    message: String,
+}
+
+impl FormattedDiagnosticEntry {
+    pub fn new(severity: Severity, error_code: Option<ErrorCode>, message: String) -> Self {
+        Self { severity, error_code, message }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.message().is_empty()
+    }
+
+    pub fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    pub fn error_code(&self) -> Option<ErrorCode> {
+        self.error_code
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl fmt::Display for FormattedDiagnosticEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{severity}{code}: {message}",
+            severity = self.severity,
+            message = self.message,
+            code = self.error_code.display_bracketed()
+        )
+    }
 }
 
 /// A set of diagnostic entries that arose during a computation.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Diagnostics<TEntry: DiagnosticEntry>(pub Arc<DiagnosticsBuilder<TEntry>>);
-impl<TEntry: DiagnosticEntry> Diagnostics<TEntry> {
+#[derive(Clone, Debug, Eq, Hash, PartialEq, salsa::Update)]
+pub struct Diagnostics<'db, TEntry: DiagnosticEntry<'db> + salsa::Update>(
+    pub Arc<DiagnosticsBuilder<'db, TEntry>>,
+);
+impl<'db, TEntry: DiagnosticEntry<'db> + salsa::Update> Diagnostics<'db, TEntry> {
     pub fn new() -> Self {
         Self(DiagnosticsBuilder::default().into())
     }
 
-    pub fn len(&self) -> usize {
-        self.0.count
+    /// Returns `true` if there are errors, or `false` otherwise.
+    pub fn has_errors(&self) -> bool {
+        self.0.error_count > 0
     }
 
+    /// Returns `Ok` if there are no errors, or `DiagnosticAdded` if there are.
+    pub fn check_error_free(&self) -> Maybe<()> {
+        if self.has_errors() { Err(DiagnosticAdded) } else { Ok(()) }
+    }
+
+    /// Checks if there are no entries inside `Diagnostics`
     pub fn is_empty(&self) -> bool {
-        self.0.count == 0
+        self.0.leaves.is_empty() && self.0.subtrees.iter().all(|subtree| subtree.is_empty())
     }
 
-    pub fn is_diagnostic_free(&self) -> Maybe<()> {
-        if self.is_empty() { Ok(()) } else { Err(DiagnosticAdded) }
-    }
+    /// Format entries to pairs of severity and message.
+    pub fn format_with_severity(
+        &self,
+        db: &'db dyn Database,
+        file_notes: &OrderedHashMap<FileId<'db>, DiagnosticNote<'db>>,
+    ) -> Vec<FormattedDiagnosticEntry> {
+        let mut res: Vec<FormattedDiagnosticEntry> = Vec::new();
 
-    pub fn format(&self, db: &TEntry::DbType) -> String {
-        let mut res = String::new();
-        // Format leaves.
-        for entry in &self.0.leaves {
-            let message = entry.format(db);
-            res += &format_diagnostics(db.upcast(), &message, entry.location(db));
-            res += "\n";
+        let files_db: &'db dyn Database = db;
+        for entry in &self.get_diagnostics_without_duplicates(db) {
+            let mut msg = String::new();
+            let diag_location = entry.location(db);
+            let (user_location, parent_file_notes) =
+                diag_location.user_location_with_plugin_notes(files_db, file_notes);
+
+            let include_generated_location = diag_location != user_location
+                && std::env::var("CAIRO_DEBUG_GENERATED_CODE").is_ok();
+            msg += &format_diagnostics(files_db, &entry.format(db), user_location);
+
+            if include_generated_location {
+                msg += &format!(
+                    "note: The error originates from the generated code in {:?}\n",
+                    diag_location.debug(files_db)
+                );
+            }
+
+            for note in entry.notes(db) {
+                msg += &format!("note: {:?}\n", note.debug(files_db))
+            }
+            for note in parent_file_notes {
+                msg += &format!("note: {:?}\n", note.debug(files_db))
+            }
+            msg += "\n";
+
+            let formatted =
+                FormattedDiagnosticEntry::new(entry.severity(), entry.error_code(), msg);
+            res.push(formatted);
         }
-        // Format subtrees.
-        res += &self.0.subtrees.iter().map(|subtree| subtree.format(db)).join("");
         res
+    }
+
+    /// Format entries to a [`String`] with messages prefixed by severity.
+    pub fn format(&self, db: &'db dyn Database) -> String {
+        self.format_with_severity(db, &Default::default()).iter().map(ToString::to_string).join("")
     }
 
     /// Asserts that no diagnostic has occurred, panicking with an error message on failure.
     pub fn expect(&self, error_message: &str) {
-        assert!(self.0.leaves.is_empty(), "{error_message}\n{self:?}");
-        for subtree in &self.0.subtrees {
-            subtree.expect(error_message);
-        }
+        assert!(self.is_empty(), "{error_message}\n{self:?}");
     }
 
     /// Same as [Self::expect], except that the diagnostics are formatted.
-    pub fn expect_with_db(&self, db: &TEntry::DbType, error_message: &str) {
-        assert!(self.0.leaves.is_empty(), "{}\n{}", error_message, self.format(db));
-        for subtree in &self.0.subtrees {
-            subtree.expect_with_db(db, error_message);
-        }
+    pub fn expect_with_db(&self, db: &'db dyn Database, error_message: &str) {
+        assert!(self.is_empty(), "{}\n{}", error_message, self.format(db));
     }
 
     // TODO(spapini): This is temporary. Remove once the logic in language server doesn't use this.
+    /// Get all diagnostics.
     pub fn get_all(&self) -> Vec<TEntry> {
         let mut res = self.0.leaves.clone();
         for subtree in &self.0.subtrees {
@@ -176,9 +347,59 @@ impl<TEntry: DiagnosticEntry> Diagnostics<TEntry> {
         }
         res
     }
+
+    /// Get diagnostics without duplication.
+    ///
+    /// Two diagnostics are considered duplicated if both point to
+    /// the same location in the user code, and are of the same kind.
+    pub fn get_diagnostics_without_duplicates(&self, db: &'db dyn Database) -> Vec<TEntry> {
+        let diagnostic_with_dup = self.get_all();
+        if diagnostic_with_dup.is_empty() {
+            return diagnostic_with_dup;
+        }
+        let files_db: &'db dyn Database = db;
+        let mut indexed_dup_diagnostic =
+            diagnostic_with_dup.iter().enumerate().sorted_by_cached_key(|(idx, diag)| {
+                (diag.location(db).user_location(files_db).span, diag.format(db), *idx)
+            });
+        let mut prev_diagnostic_indexed = indexed_dup_diagnostic.next().unwrap();
+        let mut diagnostic_without_dup = vec![prev_diagnostic_indexed];
+
+        for diag in indexed_dup_diagnostic {
+            if prev_diagnostic_indexed.1.is_same_kind(diag.1)
+                && prev_diagnostic_indexed.1.location(db).user_location(files_db).span
+                    == diag.1.location(db).user_location(files_db).span
+            {
+                continue;
+            }
+            diagnostic_without_dup.push(diag);
+            prev_diagnostic_indexed = diag;
+        }
+        diagnostic_without_dup.sort_by_key(|(idx, _)| *idx);
+        diagnostic_without_dup.into_iter().map(|(_, diag)| diag.clone()).collect()
+    }
+
+    /// Merges two sets of diagnostics.
+    pub fn merge(self, other: Self) -> Self {
+        let mut builder = DiagnosticsBuilder::default();
+        builder.extend(self);
+        builder.extend(other);
+        builder.build()
+    }
 }
-impl<TEntry: DiagnosticEntry> Default for Diagnostics<TEntry> {
+impl<'db, TEntry: DiagnosticEntry<'db> + salsa::Update> Default for Diagnostics<'db, TEntry> {
     fn default() -> Self {
         Self::new()
+    }
+}
+impl<'db, TEntry: DiagnosticEntry<'db> + salsa::Update> FromIterator<TEntry>
+    for Diagnostics<'db, TEntry>
+{
+    fn from_iter<T: IntoIterator<Item = TEntry>>(diags_iter: T) -> Self {
+        let mut builder = DiagnosticsBuilder::<'db, TEntry>::default();
+        for diag in diags_iter {
+            builder.add(diag);
+        }
+        builder.build()
     }
 }

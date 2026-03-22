@@ -1,3 +1,5 @@
+use starknet_types_core::felt::Felt as Felt252;
+
 use super::felt252::Felt252Type;
 use super::non_zero::nonzero_ty;
 use super::range_check::RangeCheckType;
@@ -26,6 +28,25 @@ impl NoGenericArgsGenericType for EcOpType {
 /// An EC point is a pair (x,y) on the curve.
 #[derive(Default)]
 pub struct EcPointType {}
+impl EcPointType {
+    /// The beta parameter of the curve.
+    pub const BETA: Felt252 = Felt252::from_hex_unchecked(
+        "0x6f21413efbe40de150e596d72f7a8c5609ad26c15c915c1f4cdfcb99cee9e89",
+    );
+    /// Returns the left hand side of the curve equation.
+    pub fn calc_lhs(x: Felt252) -> Felt252 {
+        x * x * x + x + Self::BETA
+    }
+    /// Returns the right hand side of the curve equation.
+    fn calc_rhs(y: Felt252) -> Felt252 {
+        y * y
+    }
+    /// Checks if a point is on the curve.
+    pub fn is_on_curve(x: Felt252, y: Felt252) -> bool {
+        Self::calc_lhs(x) == Self::calc_rhs(y)
+    }
+}
+
 impl NoGenericArgsGenericType for EcPointType {
     const ID: GenericTypeId = GenericTypeId::new_inline("EcPoint");
     const STORABLE: bool = true;
@@ -49,6 +70,7 @@ define_libfunc_hierarchy! {
     pub enum EcLibfunc {
         IsZero(EcIsZeroLibfunc),
         Neg(EcNegLibfunc),
+        NegNz(EcNegNzLibfunc),
         StateAdd(EcStateAddLibfunc),
         TryNew(EcCreatePointLibfunc),
         StateFinalize(EcStateFinalizeLibfunc),
@@ -121,6 +143,7 @@ impl NoGenericArgsGenericLibfunc for EcCreatePointLibfunc {
 }
 
 /// Libfunc for creating an EC point from its x coordinate.
+///
 /// If there exists `y` such that `(x, y)` is on the curve, either `(x, y)` or `(x, -y)` (both
 /// constitute valid points on the curve) is returned.
 /// Otherwise, nothing is returned.
@@ -138,7 +161,7 @@ impl NoGenericArgsGenericLibfunc for EcPointFromXLibfunc {
         let nonzero_ecpoint_ty = nonzero_ty(context, &ecpoint_ty)?;
         let range_check_type = context.get_concrete_type(RangeCheckType::id(), &[])?;
 
-        let rc_output_info = OutputVarInfo::new_builtin(range_check_type.clone(), 0);
+        let rc_output_info = OutputVarInfo::new_builtin(range_check_type.clone());
         Ok(LibfuncSignature {
             param_signatures: vec![
                 ParamSignature::new(range_check_type).with_allow_add_const(),
@@ -185,6 +208,7 @@ impl NoGenericArgsGenericLibfunc for EcUnwrapPointLibfunc {
             ty: felt252_ty,
             ref_info: OutputVarReferenceInfo::PartialParam { param_idx: 0 },
         };
+        // TODO(orizi): Consider making the returned `y` value non-zero.
         Ok(LibfuncSignature::new_non_branch(
             vec![nonzero_ecpoint_ty],
             vec![felt252_partial_param_0_output_info.clone(), felt252_partial_param_0_output_info],
@@ -193,7 +217,7 @@ impl NoGenericArgsGenericLibfunc for EcUnwrapPointLibfunc {
     }
 }
 
-/// Libfunc for unwrapping the x,y values of an EC point.
+/// Libfunc for negating an EC point.
 #[derive(Default)]
 pub struct EcNegLibfunc {}
 impl NoGenericArgsGenericLibfunc for EcNegLibfunc {
@@ -209,6 +233,30 @@ impl NoGenericArgsGenericLibfunc for EcNegLibfunc {
             vec![ecpoint_ty.clone()],
             vec![OutputVarInfo {
                 ty: ecpoint_ty,
+                ref_info: OutputVarReferenceInfo::Deferred(DeferredOutputKind::Generic),
+            }],
+            SierraApChange::Known { new_vars_only: true },
+        ))
+    }
+}
+
+/// Libfunc for negating a non-zero EC point.
+#[derive(Default)]
+pub struct EcNegNzLibfunc {}
+impl NoGenericArgsGenericLibfunc for EcNegNzLibfunc {
+    const STR_ID: &'static str = "ec_neg_nz";
+
+    fn specialize_signature(
+        &self,
+        context: &dyn SignatureSpecializationContext,
+    ) -> Result<LibfuncSignature, SpecializationError> {
+        let ecpoint_ty = context.get_concrete_type(EcPointType::id(), &[])?;
+        let nonzero_ecpoint_ty = nonzero_ty(context, &ecpoint_ty)?;
+
+        Ok(LibfuncSignature::new_non_branch(
+            vec![nonzero_ecpoint_ty.clone()],
+            vec![OutputVarInfo {
+                ty: nonzero_ecpoint_ty,
                 ref_info: OutputVarReferenceInfo::Deferred(DeferredOutputKind::Generic),
             }],
             SierraApChange::Known { new_vars_only: true },
@@ -251,7 +299,7 @@ impl NoGenericArgsGenericLibfunc for EcIsZeroLibfunc {
     }
 }
 
-/// Libfunc for initializing an EC state from an EC point.
+/// Libfunc for creating a new EC state.
 #[derive(Default)]
 pub struct EcStateInitLibfunc {}
 impl NoGenericArgsGenericLibfunc for EcStateInitLibfunc {
@@ -272,7 +320,7 @@ impl NoGenericArgsGenericLibfunc for EcStateInitLibfunc {
     }
 }
 
-/// Libfunc for initializing an EC state from an EC point.
+/// Libfunc for updating an EC state by adding a non-zero EC point.
 #[derive(Default)]
 pub struct EcStateAddLibfunc {}
 impl NoGenericArgsGenericLibfunc for EcStateAddLibfunc {
@@ -297,7 +345,8 @@ impl NoGenericArgsGenericLibfunc for EcStateAddLibfunc {
     }
 }
 
-/// Libfunc for initializing an EC state from an EC point.
+/// Libfunc for trying to finalize an EC state; returns a non-zero EC point if the resulting point
+/// is not zero, on success, otherwise returns nothing.
 #[derive(Default)]
 pub struct EcStateFinalizeLibfunc {}
 impl NoGenericArgsGenericLibfunc for EcStateFinalizeLibfunc {
@@ -358,7 +407,7 @@ impl NoGenericArgsGenericLibfunc for EcStateAddMulLibfunc {
                 ParamSignature::new(nonzero_ecpoint_ty),
             ],
             vec![
-                OutputVarInfo::new_builtin(ec_builtin_ty, 0),
+                OutputVarInfo::new_builtin(ec_builtin_ty),
                 OutputVarInfo {
                     ty: ec_state_ty,
                     ref_info: OutputVarReferenceInfo::Deferred(DeferredOutputKind::Generic),

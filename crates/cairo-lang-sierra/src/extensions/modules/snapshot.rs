@@ -2,11 +2,12 @@ use crate::extensions::lib_func::{
     LibfuncSignature, OutputVarInfo, ParamSignature, SierraApChange, SignatureOnlyGenericLibfunc,
     SignatureSpecializationContext,
 };
+use crate::extensions::type_specialization_context::TypeSpecializationContext;
 use crate::extensions::types::{
     GenericTypeArgGenericType, GenericTypeArgGenericTypeWrapper, TypeInfo,
 };
 use crate::extensions::{
-    args_as_single_type, NamedType, OutputVarReferenceInfo, SpecializationError,
+    NamedType, OutputVarReferenceInfo, SpecializationError, args_as_single_type,
 };
 use crate::ids::{ConcreteTypeId, GenericTypeId};
 use crate::program::GenericArg;
@@ -19,15 +20,16 @@ impl GenericTypeArgGenericType for SnapshotTypeWrapped {
 
     fn calc_info(
         &self,
+        _context: &dyn TypeSpecializationContext,
         long_id: crate::program::ConcreteTypeLongId,
-        TypeInfo { zero_sized, storable, duplicatable, .. }: TypeInfo,
+        wrapped_info: &TypeInfo,
     ) -> Result<TypeInfo, SpecializationError> {
         // Duplicatable types are their own snapshot - as the snapshot itself is useless if we can
         // dup the value already.
-        if storable && !duplicatable {
+        if wrapped_info.storable && !wrapped_info.duplicatable {
             Ok(TypeInfo {
                 long_id,
-                zero_sized,
+                zero_sized: wrapped_info.zero_sized,
                 storable: true,
                 droppable: true,
                 duplicatable: true,
@@ -45,7 +47,7 @@ pub fn snapshot_ty(
     context: &dyn SignatureSpecializationContext,
     ty: ConcreteTypeId,
 ) -> Result<ConcreteTypeId, SpecializationError> {
-    if context.get_type_info(ty.clone())?.duplicatable {
+    if context.get_type_info(&ty)?.duplicatable {
         Ok(ty)
     } else {
         context.get_wrapped_concrete_type(SnapshotType::id(), ty)
@@ -77,7 +79,7 @@ impl SignatureOnlyGenericLibfunc for SnapshotTakeLibfunc {
                     ref_info: OutputVarReferenceInfo::SameAsParam { param_idx: 0 },
                 },
                 OutputVarInfo {
-                    ty: snapshot_ty(context, ty)?,
+                    ty: snapshot_ty(context, ty.clone())?,
                     ref_info: OutputVarReferenceInfo::SameAsParam { param_idx: 0 },
                 },
             ],

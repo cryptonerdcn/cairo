@@ -9,8 +9,8 @@ There are several ways to introduce variables in a Cairo program.
 
 == Let statement
 
-Variables can be defined using the link:let-statement.adoc[`let`] keyword with the following syntax:
-[source]
+Variables can be defined using the xref:let-statement.adoc[`let`] keyword with the following syntax:
+[source,cairo]
 ----
 let x: u32 = 5_u32;
 ----
@@ -19,17 +19,17 @@ declares a variable named `x` of type `u32` with an initial value of `5`.
 The type annotation can be omitted in cases where the type can be deduced.
 
 For example:
-[source]
+[source,cairo]
 ----
 let x = 5_u32;
 ----
 
 Variables are immutable unless declared otherwise.
 A variable can be declared as mutable using the `mut` keyword.
-A mutable variable can be link:assignment-statement.adoc[assigned] a different value after the initialization.
+A mutable variable can be xref:assignment-statement.adoc[assigned] a different value after initialization.
 
 For example:
-[source]
+[source,cairo]
 ----
 let mut x = 17;
 x = x + 3;
@@ -40,7 +40,7 @@ x = x + 3;
 Every function parameter introduces a variable that is accessible in the body of a function.
 
 For example:
-[source]
+[source,cairo]
 ----
 fn add(x: u32, mut y: u32) -> u32 {
    y += x;
@@ -49,9 +49,9 @@ fn add(x: u32, mut y: u32) -> u32 {
 
 fn test() {
     let x = 1;
-    ley y = 2;
+    let y = 2;
     assert(add(x, y) == 3, 'Should be equal.');
-    assert(y == 1, 'Should be equal.');
+    assert(y == 2, 'Should be equal.');
 }
 ----
 
@@ -66,7 +66,7 @@ Note that `ref` parameters are mutable. Using both modifiers on the same paramet
 allowed.
 
 For example:
-[source]
+[source,cairo]
 ----
 fn inc_by_one(ref x: u32) {
    x = x + 1;
@@ -83,12 +83,12 @@ fn test() {
 
 A variable can be introduced inside a match arm.
 
-for example:
-[source]
+For example:
+[source,cairo]
 ----
 match opt {
-    Option::Some(x) => x,
-    Option::None(_) => 0,
+    Some(x) => x,
+    None => 0,
 }
 ----
 
@@ -100,8 +100,8 @@ A variable name can be reused in an inner scope (or the same scope).
 In this case, the variable shadows the variable in the outer scope,
 but it does not change the variable in the outer scope.
 
-for example:
-[source]
+For example:
+[source,cairo]
 ----
 let x = 5;
 {
@@ -110,10 +110,10 @@ let x = 5;
 assert(x == 5, 'Should be equal.');
 ----
 
-In contrast when a mutable variable is assigned in an inner scope, it also changes in the outer
+In contrast, when a mutable variable is assigned in an inner scope, it also changes in the outer
 scope.
 
-[source]
+[source,cairo]
 ----
 let mut x = 5;
 {

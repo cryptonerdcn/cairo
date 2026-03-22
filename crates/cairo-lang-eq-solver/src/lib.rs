@@ -7,7 +7,7 @@ use std::hash::Hash;
 use cairo_lang_utils::casts::IntoOrPanic;
 use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
 pub use expr::Expr;
-use good_lp::{default_solver, variable, variables, Expression, Solution, SolverModel};
+use good_lp::{Expression, Solution, SolverModel, default_solver, variable, variables};
 
 /// Solving a set of equations and returning the values of the symbols contained in them.
 /// # Arguments
@@ -17,7 +17,7 @@ use good_lp::{default_solver, variable, variables, Expression, Solution, SolverM
 /// # Returns
 /// * `Some(OrderedHashMap<Var, i64>)` - The solutions to the equations.
 /// * `None` - The equations are unsolvable.
-pub fn try_solve_equations<Var: Clone + Debug + PartialEq + Eq + Hash>(
+pub fn try_solve_equations<Var: Clone + Debug + Eq + Hash>(
     mut equations: Vec<Expr<Var>>,
     minimization_vars: Vec<Vec<Var>>,
 ) -> Option<OrderedHashMap<Var, i64>> {
@@ -65,12 +65,12 @@ pub fn try_solve_equations<Var: Clone + Debug + PartialEq + Eq + Hash>(
 /// # Returns
 /// * `Some(OrderedHashMap<Var, i64>)` - The solutions to the equations.
 /// * `None` - The equations are unsolvable.
-fn try_solve_equations_iteration<Var: Clone + Debug + PartialEq + Eq + Hash>(
+fn try_solve_equations_iteration<Var: Clone + Debug + Eq + Hash>(
     equations: &[Expr<Var>],
     target_vars: &[Var],
 ) -> Option<OrderedHashMap<Var, i64>> {
     let mut vars = variables!();
-    let mut orig_to_solver_var = OrderedHashMap::default();
+    let mut orig_to_solver_var = OrderedHashMap::<_, _>::default();
     // Add all variables to structure and map.
     for eq in equations {
         for var in eq.var_to_coef.keys() {
@@ -83,7 +83,7 @@ fn try_solve_equations_iteration<Var: Clone + Debug + PartialEq + Eq + Hash>(
 
     let mut problem = vars.minimise(target).using(default_solver);
     // Adding constraints for all equations.
-    for eq in equations.iter() {
+    for eq in equations {
         let as_solver_expr = |expr: &Expr<Var>| {
             Expression::from_other_affine(expr.const_term)
                 + expr

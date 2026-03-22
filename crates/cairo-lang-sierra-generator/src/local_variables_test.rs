@@ -1,19 +1,14 @@
-use std::sync::Arc;
-
 use cairo_lang_debug::DebugWithDb;
-use cairo_lang_filesystem::db::FilesGroupEx;
-use cairo_lang_filesystem::flag::Flag;
-use cairo_lang_filesystem::ids::FlagId;
-use cairo_lang_lowering as lowering;
 use cairo_lang_lowering::db::LoweringGroup;
+use cairo_lang_lowering::{self as lowering, LoweringStage};
 use cairo_lang_semantic::test_utils::setup_test_function;
+use cairo_lang_test_utils::parse_test_file::TestRunnerResult;
 use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
-use cairo_lang_utils::UpcastMut;
 use itertools::Itertools;
 use lowering::ids::ConcreteFunctionWithBodyId;
 
-use super::AnalyzeApChangesResult;
 use crate::function_generator_test_utils::test_function_generator;
+use crate::local_variables::analyze_ap_changes;
 use crate::test_utils::SierraGenDatabaseForTesting;
 
 cairo_lang_test_utils::test_file_test!(
@@ -34,22 +29,14 @@ cairo_lang_test_utils::test_file_test!(
 
 fn check_find_local_variables(
     inputs: &OrderedHashMap<String, String>,
-) -> OrderedHashMap<String, String> {
-    let db = &mut SierraGenDatabaseForTesting::default();
-
+    _args: &OrderedHashMap<String, String>,
+) -> TestRunnerResult {
     // Tests have recursions for revoking AP. Automatic addition of 'withdraw_gas` calls would add
     // unnecessary complication to them.
-    let add_withdraw_gas_flag_id = FlagId::new(db.upcast_mut(), "add_withdraw_gas");
-    db.set_flag(add_withdraw_gas_flag_id, Some(Arc::new(Flag::AddWithdrawGas(false))));
+    let db = &SierraGenDatabaseForTesting::without_add_withdraw_gas();
 
     // Parse code and create semantic model.
-    let test_function = setup_test_function(
-        db,
-        inputs["function_code"].as_str(),
-        inputs["function_name"].as_str(),
-        inputs["module_code"].as_str(),
-    )
-    .unwrap();
+    let test_function = setup_test_function(db, inputs).unwrap();
 
     db.module_lowering_diagnostics(test_function.module_id)
         .unwrap()
@@ -57,24 +44,23 @@ fn check_find_local_variables(
 
     let function_id =
         ConcreteFunctionWithBodyId::from_semantic(db, test_function.concrete_function_id);
-    let lowered_function = &*db.concrete_function_with_body_lowered(function_id).unwrap();
+    let lowered_function = db.lowered_body(function_id, LoweringStage::Final).unwrap();
 
-    let lowered_formatter =
-        lowering::fmt::LoweredFormatter { db, variables: &lowered_function.variables };
+    let lowered_formatter = lowering::fmt::LoweredFormatter::new(db, &lowered_function.variables);
     let lowered_str = format!("{:?}", lowered_function.debug(&lowered_formatter));
 
-    let AnalyzeApChangesResult { known_ap_change: _, local_variables, .. } =
-        super::analyze_ap_changes(db, lowered_function).unwrap();
-
-    let local_variables_str = local_variables
+    let local_variables_str = analyze_ap_changes(db, lowered_function)
+        .unwrap()
+        .variables_info
+        .local_variables
         .iter()
-        .map(|var_id| format!("{:?}", var_id.debug(&lowered_formatter)))
+        .map(|var_id| format!("v{:?}", var_id.index()))
         .join(", ");
 
-    OrderedHashMap::from([
+    TestRunnerResult::success(OrderedHashMap::from([
         ("lowering_format".into(), lowered_str),
         ("local_variables".into(), local_variables_str),
-    ])
+    ]))
 }
 
 cairo_lang_test_utils::test_file_test!(

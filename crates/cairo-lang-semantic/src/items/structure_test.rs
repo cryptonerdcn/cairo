@@ -1,25 +1,27 @@
 use cairo_lang_debug::DebugWithDb;
 use cairo_lang_defs::ids::ModuleItemId;
+use cairo_lang_filesystem::ids::SmolStrId;
+use cairo_lang_test_utils::test;
 use cairo_lang_utils::extract_matches;
 use indoc::indoc;
 use pretty_assertions::assert_eq;
-use test_log::test;
 
-use crate::db::SemanticGroup;
-use crate::test_utils::{setup_test_module, SemanticDatabaseForTesting};
+use crate::items::module::ModuleSemantic;
+use crate::items::structure::StructSemantic;
+use crate::test_utils::{SemanticDatabaseForTesting, setup_test_module};
 
 #[test]
 fn test_struct() {
-    let mut db_val = SemanticDatabaseForTesting::default();
-    let db = &mut db_val;
+    let db_val = SemanticDatabaseForTesting::default();
+    let db = &db_val;
     let (test_module, diagnostics) = setup_test_module(
         db,
         indoc::indoc! {"
-            #[contract(MyImpl1, MyImpl2)]
+            #[inline(MyImpl1, MyImpl2)]
             struct A {
                 a: felt252,
-                b: (felt252, felt252),
-                c: (),
+                pub b: (felt252, felt252),
+                pub(crate) c: (),
                 a: (),
                 a: ()
             }
@@ -33,37 +35,37 @@ fn test_struct() {
     assert_eq!(
         diagnostics,
         indoc! {r#"
-        error: Redefinition of member "a" on struct "test::A".
+        error[E2050]: Redefinition of member "a" on struct "A".
          --> lib.cairo:6:5
             a: (),
-            ^***^
+            ^^^^^
 
-        error: Redefinition of member "a" on struct "test::A".
+        error[E2050]: Redefinition of member "a" on struct "A".
          --> lib.cairo:7:5
             a: ()
-            ^***^
+            ^^^^^
 
         "#}
     );
     let module_id = test_module.module_id;
 
     let struct_id = extract_matches!(
-        db.module_item_by_name(module_id, "A".into()).unwrap().unwrap(),
+        db.module_item_by_name(module_id, SmolStrId::from(db, "A")).unwrap().unwrap(),
         ModuleItemId::Struct
     );
     let actual = db
         .struct_members(struct_id)
         .unwrap()
         .iter()
-        .map(|(name, member)| format!("{name}: {:?}", member.debug(db)))
+        .map(|(name, member)| format!("{}: {:?}", name.long(db), member.debug(db)))
         .collect::<Vec<_>>()
         .join(",\n");
     assert_eq!(
         actual,
         indoc! {"
-            a: Member { id: MemberId(test::a), ty: () },
-            b: Member { id: MemberId(test::b), ty: (core::felt252, core::felt252) },
-            c: Member { id: MemberId(test::c), ty: () }"}
+            a: Member { id: MemberId(test::A::a), ty: (), visibility: Private },
+            b: Member { id: MemberId(test::A::b), ty: (core::felt252, core::felt252), visibility: Public },
+            c: Member { id: MemberId(test::A::c), ty: (), visibility: PublicInCrate }"}
     );
 
     assert_eq!(
@@ -73,6 +75,6 @@ fn test_struct() {
             .map(|attr| format!("{:?}", attr.debug(db)))
             .collect::<Vec<_>>()
             .join(",\n"),
-        r#"Attribute { id: "contract", args: ["MyImpl1", "MyImpl2", ] }"#
+        r#"Attribute { id: "inline", args: ["MyImpl1", "MyImpl2", ] }"#
     );
 }

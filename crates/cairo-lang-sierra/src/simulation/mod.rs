@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
+use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
 use itertools::izip;
 use thiserror::Error;
 
 use self::value::CoreValue;
-use crate::edit_state::{put_results, take_args, EditStateError};
+use crate::edit_state::{EditState, EditStateError};
 use crate::extensions::core::{CoreConcreteLibfunc, CoreLibfunc, CoreType};
 use crate::ids::{FunctionId, VarId};
 use crate::program::{Program, Statement, StatementIdx};
@@ -22,8 +23,6 @@ pub enum LibfuncSimulationError {
     WrongNumberOfArgs,
     #[error("Expected a different type of an argument")]
     WrongArgType,
-    #[error("Expected a different memory layout")]
-    MemoryLayoutMismatch,
     #[error("Could not resolve requested symbol value")]
     UnresolvedStatementGasInfo,
     #[error("Error occurred during user function call")]
@@ -84,21 +83,20 @@ impl SimulationContext<'_> {
                 actual: inputs.len(),
             });
         }
-        let mut state = HashMap::<VarId, CoreValue>::from_iter(
-            izip!(func.params.iter(), inputs.into_iter())
-                .map(|(param, input)| (param.id.clone(), input)),
+        let mut state = OrderedHashMap::<VarId, CoreValue>::from_iter(
+            izip!(func.params.iter(), inputs).map(|(param, input)| (param.id.clone(), input)),
         );
         loop {
             let statement = self
                 .program
-                .get_statement(&current_statement_id)
+                .get_statement(current_statement_id)
                 .ok_or(SimulationError::StatementOutOfBounds(current_statement_id))?;
             match statement {
                 Statement::Return(ids) => {
-                    let (remaining, outputs) = take_args(state, ids.iter()).map_err(|error| {
+                    let outputs = state.take_vars(ids.iter()).map_err(|error| {
                         SimulationError::EditStateError(error, current_statement_id)
                     })?;
-                    return if remaining.is_empty() {
+                    return if state.is_empty() {
                         Ok(outputs)
                     } else {
                         Err(SimulationError::FunctionDidNotConsumeAllArgs(
@@ -108,26 +106,17 @@ impl SimulationContext<'_> {
                     };
                 }
                 Statement::Invocation(invocation) => {
-                    let (remaining, inputs) =
-                        take_args(state, invocation.args.iter()).map_err(|error| {
-                            SimulationError::EditStateError(error, current_statement_id)
-                        })?;
-                    let libfunc = self.registry.get_libfunc(&invocation.libfunc_id)?;
-                    let (outputs, chosen_branch) = self.simulate_libfunc(
-                        &current_statement_id,
-                        libfunc,
-                        inputs,
-                        current_statement_id,
-                    )?;
-                    let branch_info = &invocation.branches[chosen_branch];
-                    state = put_results(
-                        remaining,
-                        izip!(branch_info.results.iter(), outputs.into_iter()),
-                    )
-                    .map_err(|error| {
+                    let inputs = state.take_vars(invocation.args.iter()).map_err(|error| {
                         SimulationError::EditStateError(error, current_statement_id)
                     })?;
-                    current_statement_id = current_statement_id.next(&branch_info.target);
+                    let libfunc = self.registry.get_libfunc(&invocation.libfunc_id)?;
+                    let (outputs, chosen_branch) =
+                        self.simulate_libfunc(current_statement_id, libfunc, inputs)?;
+                    let branch_info = &invocation.branches[chosen_branch];
+                    state.put_vars(izip!(branch_info.results.iter(), outputs)).map_err(
+                        |error| SimulationError::EditStateError(error, current_statement_id),
+                    )?;
+                    current_statement_id = current_statement_id.next(branch_info.target);
                 }
             }
         }
@@ -136,15 +125,14 @@ impl SimulationContext<'_> {
     /// inputs.
     fn simulate_libfunc(
         &self,
-        idx: &StatementIdx,
+        statement_id: StatementIdx,
         libfunc: &CoreConcreteLibfunc,
         inputs: Vec<CoreValue>,
-        current_statement_id: StatementIdx,
     ) -> Result<(Vec<CoreValue>, usize), SimulationError> {
         core::simulate(
             libfunc,
             inputs,
-            || self.statement_gas_info.get(idx).copied(),
+            || self.statement_gas_info.get(&statement_id).copied(),
             |function_id, inputs| {
                 self.simulate_function(function_id, inputs).map_err(|error| {
                     LibfuncSimulationError::FunctionSimulationError(
@@ -154,6 +142,6 @@ impl SimulationContext<'_> {
                 })
             },
         )
-        .map_err(|error| SimulationError::LibfuncSimulationError(error, current_statement_id))
+        .map_err(|error| SimulationError::LibfuncSimulationError(error, statement_id))
     }
 }

@@ -1,45 +1,39 @@
-use cairo_lang_syntax::node::db::SyntaxGroup;
+use cairo_lang_syntax::node::SyntaxNode;
 use cairo_lang_syntax::node::green::GreenNodeDetails;
 use cairo_lang_syntax::node::kind::SyntaxKind;
-use cairo_lang_syntax::node::SyntaxNode;
 use colored::{ColoredString, Colorize};
-use smol_str::SmolStr;
+use salsa::Database;
 
 struct ColoredPrinter<'a> {
-    db: &'a dyn SyntaxGroup,
+    db: &'a dyn Database,
     /// Whether to also print empty and missing tokens/nodes
     verbose: bool,
     result: String,
 }
-impl<'a> ColoredPrinter<'a> {
-    fn print(&mut self, syntax_node: &SyntaxNode) {
+impl ColoredPrinter<'_> {
+    fn print(&mut self, syntax_node: &SyntaxNode<'_>) {
         let node = syntax_node.green_node(self.db);
-        match node.details {
+        match &node.details {
             GreenNodeDetails::Token(text) => {
                 if self.verbose && node.kind == SyntaxKind::TokenMissing {
-                    self.result.push_str(format!("{}", "<m>".red()).as_str());
+                    self.result.push_str(&format!("{}", "<m>".red()));
                 } else {
-                    self.result.push_str(set_color(text, node.kind).to_string().as_str());
+                    self.result.push_str(&set_color(text.long(self.db), node.kind).to_string());
                 }
             }
             GreenNodeDetails::Node { .. } => {
-                if self.verbose && is_missing_kind(node.kind) {
-                    self.result.push_str(format!("{}", "<m>".red()).as_str());
+                if self.verbose && node.kind.is_missing() {
+                    self.result.push_str(&format!("{}", "<m>".red()));
                 } else if self.verbose && is_empty_kind(node.kind) {
-                    self.result.push_str(format!("{}", "<e>".red()).as_str());
+                    self.result.push_str(&format!("{}", "<e>".red()));
                 } else {
-                    for child in syntax_node.children(self.db) {
-                        self.print(&child);
+                    for child in syntax_node.get_children(self.db).iter() {
+                        self.print(child);
                     }
                 }
             }
         }
     }
-}
-
-// TODO(yuval): autogenerate both.
-fn is_missing_kind(kind: SyntaxKind) -> bool {
-    matches!(kind, SyntaxKind::ExprMissing | SyntaxKind::StatementMissing)
 }
 
 // TODO(yuval): Move to SyntaxKind.
@@ -55,7 +49,7 @@ pub fn is_empty_kind(kind: SyntaxKind) -> bool {
     )
 }
 
-fn set_color(text: SmolStr, kind: SyntaxKind) -> ColoredString {
+fn set_color(text: &str, kind: SyntaxKind) -> ColoredString {
     // TODO(yuval): use tags on SyntaxKind
     match kind {
         SyntaxKind::TokenIdentifier => text.truecolor(255, 255, 100), // Yellow
@@ -68,7 +62,8 @@ fn set_color(text: SmolStr, kind: SyntaxKind) -> ColoredString {
         SyntaxKind::TokenLiteralNumber
         | SyntaxKind::TokenFalse
         | SyntaxKind::TokenTrue
-        | SyntaxKind::TokenShortString => text.bright_cyan(),
+        | SyntaxKind::TokenShortString
+        | SyntaxKind::TokenString => text.bright_cyan(),
         SyntaxKind::TokenExtern
         | SyntaxKind::TokenType
         | SyntaxKind::TokenFunction
@@ -93,6 +88,7 @@ fn set_color(text: SmolStr, kind: SyntaxKind) -> ColoredString {
         | SyntaxKind::TokenColon
         | SyntaxKind::TokenColonColon
         | SyntaxKind::TokenDotDot
+        | SyntaxKind::TokenDotDotEq
         | SyntaxKind::TokenSemicolon
         | SyntaxKind::TokenAnd
         | SyntaxKind::TokenAndAnd
@@ -125,14 +121,15 @@ fn set_color(text: SmolStr, kind: SyntaxKind) -> ColoredString {
         SyntaxKind::TokenSkipped => text.on_red(), // red background
         SyntaxKind::TokenSingleLineComment
         | SyntaxKind::TokenWhitespace
-        | SyntaxKind::TokenNewline => text.clear(),
+        | SyntaxKind::TokenNewline
+        | SyntaxKind::TokenEmpty => text.clear(),
         // TODO(yuval): Can this be made exhaustive?
         _ => panic!("Unexpected syntax kind: {kind:?}"),
     }
 }
 
-pub fn print_colored(db: &dyn SyntaxGroup, syntax_root: &SyntaxNode, verbose: bool) -> String {
-    let mut printer = ColoredPrinter { db, verbose, result: "".to_string() };
+pub fn print_colored(db: &dyn Database, syntax_root: &SyntaxNode<'_>, verbose: bool) -> String {
+    let mut printer = ColoredPrinter { db, verbose, result: Default::default() };
     printer.print(syntax_root);
     printer.result
 }

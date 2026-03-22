@@ -1,7 +1,7 @@
-#[derive(Copy, Drop, storage_access::StorageAccess)]
+#[derive(Copy, Drop, starknet::Store)]
 struct Node {
     left: u128,
-    right: u128
+    right: u128,
 }
 
 #[starknet::interface]
@@ -10,14 +10,13 @@ trait ITree<TContractState> {
 }
 
 #[starknet::contract]
-mod ExampleFailure {
-    use super::Node;
-    use super::ITree;
-    use array::{ArrayTrait, Array};
+mod example_failure {
+    use starknet::storage::Map;
+    use super::{ITree, Node};
 
     #[storage]
     struct Storage {
-        nodes: LegacyMap::<u128, Node>, 
+        nodes: Map<u128, Node>,
     }
 
     #[generate_trait]
@@ -34,10 +33,10 @@ mod ExampleFailure {
         }
     }
 
-    #[external(v0)]
+    #[abi(embed_v0)]
     impl Tree of ITree<ContractState> {
         fn sorted_list(ref self: ContractState, root: u128) {
-            let mut in_order: Array<(u128, Node)> = ArrayTrait::new();
+            let mut in_order: Array<(u128, Node)> = array![];
             self.append_in_order_nodes(ref in_order, root);
         }
     }

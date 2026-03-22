@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
-use cairo_felt::Felt252;
 use cairo_vm::types::relocatable::{MaybeRelocatable, Relocatable};
 use cairo_vm::vm::vm_core::VirtualMachine;
+use starknet_types_core::felt::Felt as Felt252;
 
 /// Stores the data of a specific dictionary.
 pub struct DictTrackerExecScope {
     /// The data of the dictionary.
     data: HashMap<Felt252, MaybeRelocatable>,
     /// The index of the dictionary in the dict_infos segment.
-    #[allow(dead_code)]
     idx: usize,
 }
 
@@ -30,9 +29,19 @@ impl DictTrackerExecScope {
 impl DictManagerExecScope {
     pub const DICT_DEFAULT_VALUE: usize = 0;
 
-    /// Allocates a new segment for a new dictionary and return the start of the segment.
-    pub fn new_default_dict(&mut self, vm: &mut VirtualMachine) -> Relocatable {
-        let dict_segment = vm.add_memory_segment();
+    /// Allocates a new segment for a new dictionary and returns the start of the segment.
+    pub fn new_default_dict(
+        &mut self,
+        vm: &mut VirtualMachine,
+        no_temporary_segments: bool,
+    ) -> Relocatable {
+        // If we are not on the first segment - using temporary segments to later be merged into
+        // the previous segments.
+        let dict_segment = if self.trackers.is_empty() || no_temporary_segments {
+            vm.add_memory_segment()
+        } else {
+            vm.add_temporary_segment()
+        };
         assert!(
             self.trackers
                 .insert(dict_segment.segment_index, DictTrackerExecScope::new(self.trackers.len()))

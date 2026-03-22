@@ -1,10 +1,10 @@
 use cairo_lang_casm::ap_change::ApChange;
 use cairo_lang_casm::casm;
+use cairo_lang_test_utils::test;
 use pretty_assertions::assert_eq;
-use test_log::test;
 
 use crate::invocations::test_utils::{
-    compile_libfunc, ReducedBranchChanges, ReducedCompiledInvocation,
+    ReducedBranchChanges, ReducedCompiledInvocation, compile_libfunc,
 };
 use crate::ref_expr;
 

@@ -1,7 +1,9 @@
-use std::collections::HashMap;
 use std::hash::Hash;
+use std::marker::PhantomData;
 
+use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
 use itertools::Itertools;
+use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
@@ -13,24 +15,56 @@ use crate::program::{GenericArg, Program, Statement};
 mod test;
 
 /// Debug information for a Sierra program, to get readable names.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Default, Serialize, Deserialize)]
 pub struct DebugInfo {
     #[serde(
         serialize_with = "serialize_map::<ConcreteTypeId, _>",
         deserialize_with = "deserialize_map::<ConcreteTypeId, _>"
     )]
-    pub type_names: HashMap<ConcreteTypeId, SmolStr>,
+    pub type_names: OrderedHashMap<ConcreteTypeId, SmolStr>,
     #[serde(
         serialize_with = "serialize_map::<ConcreteLibfuncId, _>",
         deserialize_with = "deserialize_map::<ConcreteLibfuncId, _>"
     )]
-    pub libfunc_names: HashMap<ConcreteLibfuncId, SmolStr>,
+    pub libfunc_names: OrderedHashMap<ConcreteLibfuncId, SmolStr>,
     #[serde(
         serialize_with = "serialize_map::<FunctionId, _>",
         deserialize_with = "deserialize_map::<FunctionId, _>"
     )]
-    pub user_func_names: HashMap<FunctionId, SmolStr>,
+    pub user_func_names: OrderedHashMap<FunctionId, SmolStr>,
+    /// Non-crucial information about the program, for use by external libraries and tools.
+    ///
+    /// See [`Annotations`] type documentation for more information about this field.
+    #[serde(default, skip_serializing_if = "Annotations::is_empty")]
+    pub annotations: Annotations,
+    /// List of functions marked as executable.
+    #[serde(default, skip_serializing_if = "OrderedHashMap::is_empty")]
+    pub executables: OrderedHashMap<String, Vec<FunctionId>>,
 }
+
+/// Store for non-crucial information about the program, for use by external libraries and tools.
+///
+/// Keys represent tool namespaces, and values are tool-specific annotations themselves.
+/// Annotation values are JSON values, so they can be arbitrarily complex.
+///
+/// ## Namespaces
+///
+/// In order to avoid collisions between tools, namespaces should be URL-like, contain tool name.
+/// It is not required for namespace URLs to exist, but it is preferable nonetheless.
+///
+/// A single tool might want to use multiple namespaces, for example to group together annotations
+/// coming from different subcomponents of the tool. In such a case, namespaces should use path-like
+/// notation (e.g. `example.com/sub-namespace`).
+///
+/// For future-proofing, it might be a good idea to version namespaces, e.g. `example.com/v1`.
+///
+/// ### Example well-formed namespaces
+///
+/// - `scarb.swmansion.com`
+/// - `scarb.swmansion.com/v1`
+/// - `scarb.swmansion.com/build-info/v1`
+pub type Annotations = OrderedHashMap<String, serde_json::Value>;
+
 impl DebugInfo {
     /// Extracts the existing debug info from a program.
     pub fn extract(program: &Program) -> Self {
@@ -59,6 +93,8 @@ impl DebugInfo {
                     func.id.debug_name.clone().map(|name| (FunctionId::new(func.id.id), name))
                 })
                 .collect(),
+            annotations: Default::default(),
+            executables: Default::default(),
         }
     }
 
@@ -106,7 +142,7 @@ impl DebugInfo {
         }
     }
 
-    /// Replaces the debug name of an id if exists in the matching map.
+    /// Replaces the debug name of an id if it exists in the matching map.
     fn try_replace_type_id(&self, id: &mut ConcreteTypeId) {
         if let Some(name) = self.type_names.get(id).cloned() {
             let _ = id.debug_name.insert(name);
@@ -165,18 +201,44 @@ impl IdAsHashKey for FunctionId {
 }
 
 fn serialize_map<Id: IdAsHashKey, S: serde::Serializer>(
-    m: &HashMap<Id, SmolStr>,
+    m: &OrderedHashMap<Id, SmolStr>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    let v: Vec<_> = m.iter().map(|(id, name)| (id.get(), name)).sorted().collect();
-    v.serialize(serializer)
+    serializer.collect_seq(m.iter().map(|(id, name)| (id.get(), name)).sorted())
 }
 
 fn deserialize_map<'de, Id: IdAsHashKey, D: serde::Deserializer<'de>>(
     deserializer: D,
-) -> Result<HashMap<Id, SmolStr>, D::Error> {
-    Ok(Vec::<(u64, SmolStr)>::deserialize(deserializer)?
-        .into_iter()
-        .map(|(id, name)| (Id::new(id), name))
-        .collect())
+) -> Result<OrderedHashMap<Id, SmolStr>, D::Error> {
+    struct OrderedHashMapVisitor<Id> {
+        marker: PhantomData<Id>,
+    }
+
+    impl<'de, Id> Visitor<'de> for OrderedHashMapVisitor<Id>
+    where
+        Id: IdAsHashKey,
+    {
+        type Value = OrderedHashMap<Id, SmolStr>;
+
+        fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            formatter.write_str("a sequence of pairs")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = OrderedHashMap::default();
+            if let Some(size) = seq.size_hint() {
+                values.reserve_exact(size);
+            }
+
+            while let Some((k, v)) = seq.next_element()? {
+                values.insert(Id::new(k), v);
+            }
+
+            Ok(values)
+        }
+    }
+    deserializer.deserialize_seq(OrderedHashMapVisitor { marker: PhantomData })
 }
